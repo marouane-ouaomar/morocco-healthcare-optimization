@@ -1,0 +1,36 @@
+# ── Core data & geospatial ───────────────────────────────────────────────────
+geopandas==0.14.4
+pandas==2.2.2
+numpy==1.26.4
+shapely==2.0.4
+pyproj==3.6.1
+fiona==1.9.6
+
+# ── Spatial algorithms ───────────────────────────────────────────────────────
+scipy==1.13.0
+
+# ── Machine learning (optimization) ─────────────────────────────────────────
+scikit-learn==1.5.0
+
+# ── HTTP / API ───────────────────────────────────────────────────────────────
+requests==2.32.3
+
+# ── Dashboard ────────────────────────────────────────────────────────────────
+streamlit==1.35.0
+folium==0.16.0
+streamlit-folium==0.20.0
+plotly==5.22.0
+
+# ── LLM (triage bot — optional, local fallback available) ────────────────────
+anthropic==0.28.0   # or swap for openai / local Ollama
+
+# ── Config & validation ──────────────────────────────────────────────────────
+python-dotenv==1.0.1
+pydantic==2.7.1
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+pytest==8.2.1
+pytest-cov==5.0.0
+
+# ── Optional: OR-Tools MIP solver ────────────────────────────────────────────
+# ortools==9.10.4067   # uncomment for Phase 3 advanced optimization
