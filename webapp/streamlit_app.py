@@ -29,7 +29,7 @@ from src.access_metrics import (
     population_weighted_distance,
     population_per_facility_ratio,
 )
-from src.scenario_simulator import run_scenario, DEFAULT_COVERAGE_TARGET, DEFAULT_BUDGET_MAD, DEFAULT_MAX_AVG_DISTANCE, DEFAULT_COVERAGE_RADIUS_KM
+from src.scenario_simulator import run_scenario
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
@@ -472,56 +472,15 @@ def render_sidebar(facilities_gdf: gpd.GeoDataFrame) -> dict:
                     margin-bottom:8px;'>⚙️ Scenario Simulator</div>
         """, unsafe_allow_html=True)
 
-        mode = st.selectbox(
-            "🎯 Optimization Mode",
-            options=["coverage_target", "budget", "max_avg_distance"],
-            format_func=lambda x: {
-                "coverage_target":  "🎯 Coverage Target %",
-                "budget":           "💰 Budget (MAD)",
-                "max_avg_distance": "📏 Max Avg Distance (km)",
-            }[x],
+        new_facilities = st.slider(
+            "🏗 New clinics / facilities", 0, 10, 3
         )
-
-        if mode == "coverage_target":
-            coverage_radius_km = st.selectbox(
-                "Coverage radius", [5, 10, 20],
-                format_func=lambda x: f"{x} km", index=1
-            )
-            coverage_target = st.slider(
-                "🎯 Target coverage %", 50, 98, 85, step=1,
-                help="Place facilities until this % of population is within the coverage radius"
-            )
-            budget_mad = DEFAULT_BUDGET_MAD
-            max_avg_distance_km = DEFAULT_MAX_AVG_DISTANCE
-
-        elif mode == "budget":
-            coverage_radius_km = st.selectbox(
-                "Coverage radius", [5, 10, 20],
-                format_func=lambda x: f"{x} km", index=1
-            )
-            budget_millions = st.slider(
-                "💰 Budget (millions MAD)", 15, 300, 75, step=15,
-                help="Add facilities until this budget is exhausted (15M MAD ≈ 1 facility)"
-            )
-            budget_mad = budget_millions * 1_000_000
-            coverage_target = DEFAULT_COVERAGE_TARGET
-            max_avg_distance_km = DEFAULT_MAX_AVG_DISTANCE
-            st.markdown(
-                f"<div class='info-box'>≈ {int(budget_mad // 15_000_000)} new facilities</div>",
-                unsafe_allow_html=True
-            )
-
-        else:  # max_avg_distance
-            coverage_radius_km = st.selectbox(
-                "Coverage radius", [5, 10, 20],
-                format_func=lambda x: f"{x} km", index=1
-            )
-            max_avg_distance_km = st.slider(
-                "📏 Max avg distance (km)", 2.0, 20.0, 8.0, step=0.5,
-                help="Place facilities until population-weighted mean distance falls to this value"
-            )
-            coverage_target = DEFAULT_COVERAGE_TARGET
-            budget_mad = DEFAULT_BUDGET_MAD
+        mobile_units = st.slider(
+            "🚐 Mobile health units", 0, 5, 1
+        )
+        kiosks = st.slider(
+            "💻 Telemedicine kiosks", 0, 20, 2
+        )
 
         run_btn = st.button("▶ RUN SCENARIO", use_container_width=True)
 
@@ -535,15 +494,13 @@ def render_sidebar(facilities_gdf: gpd.GeoDataFrame) -> dict:
         """, unsafe_allow_html=True)
 
     return {
-        "region":               selected_region,
-        "facility_types":       selected_types,
-        "radius_km":            radius_km,
-        "mode":                 mode,
-        "coverage_target":      coverage_target,
-        "budget_mad":           budget_mad,
-        "max_avg_distance_km":  max_avg_distance_km,
-        "coverage_radius_km":   coverage_radius_km,
-        "run_scenario":         run_btn,
+        "region": selected_region,
+        "facility_types": selected_types,
+        "radius_km": radius_km,
+        "new_facilities": new_facilities,
+        "mobile_units": mobile_units,
+        "kiosks": kiosks,
+        "run_scenario": run_btn,
     }
 
 
@@ -964,25 +921,31 @@ def render_scenario_tab(
         facilities_gdf: Full (unfiltered) facility GeoDataFrame.
         pop_gdf: Population grid.
         baseline: Pre-computed baseline metrics.
-        scenario_config: Dict with mode, coverage_target, budget_mad,
-            max_avg_distance_km, coverage_radius_km, run_scenario.
+        scenario_config: Dict with new_facilities, mobile_units, kiosks, run_scenario.
     """
     # ── Run scenario if button pressed ───────────────────────────────────
     if scenario_config["run_scenario"]:
-        if True:
+        total = (scenario_config["new_facilities"]
+                 + scenario_config["mobile_units"]
+                 + scenario_config["kiosks"])
+        if total == 0:
+            st.warning("Set at least one intervention in the sidebar before running.")
+        else:
             with st.spinner("🔄 Running optimization scenario..."):
                 try:
                     results = run_scenario(
                         pop_gdf=pop_gdf,
                         facilities_gdf=facilities_gdf,
-                        mode=scenario_config["mode"],
-                        coverage_target=scenario_config["coverage_target"],
-                        budget_mad=scenario_config["budget_mad"],
-                        max_avg_distance_km=scenario_config["max_avg_distance_km"],
-                        coverage_radius_km=scenario_config["coverage_radius_km"],
+                        new_facilities=scenario_config["new_facilities"],
+                        mobile_units=scenario_config["mobile_units"],
+                        telemedicine_kiosks=scenario_config["kiosks"],
                     )
                     st.session_state["scenario_results"] = results
-                    st.session_state["scenario_config_used"] = scenario_config
+                    st.session_state["scenario_config_used"] = {
+                        "new_facilities": scenario_config["new_facilities"],
+                        "mobile_units":   scenario_config["mobile_units"],
+                        "kiosks":         scenario_config["kiosks"],
+                    }
                 except Exception as e:
                     st.error(f"Scenario failed: {e}")
                     logger.exception("Scenario error")
