@@ -247,36 +247,34 @@ def _region_from_coords(row: pd.Series) -> str:
 
 def validate_coordinates(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
-    Validate and clean coordinate data.
+    Validate and clean coordinate data using production-grade spatial checks.
 
-    Checks:
-    - Geometry is not null
-    - Geometry is valid (repairs if possible)
-    - Coordinates are within Morocco's bounding box
-    - CRS is set to EPSG:4326
-    - No duplicate geometries (exact same point)
+    Steps:
+    1. Enforce EPSG:4326 CRS
+    2. Remove null / empty geometries
+    3. Repair invalid geometries
+    4. Strict Morocco polygon containment check (drops Algeria / ocean artifacts)
+    5. Remove exact duplicate geometries
 
     Args:
         gdf: GeoDataFrame after normalisation.
 
     Returns:
-        GeoDataFrame with invalid/out-of-bounds rows removed and CRS enforced.
-
-    Raises:
-        ValueError: If GeoDataFrame has no CRS and cannot be set.
+        GeoDataFrame with all invalid/out-of-bounds rows removed.
     """
+    from src.spatial_utils import enforce_spatial_integrity
+
     logger.info(f"validate_coordinates: input rows = {len(gdf)}")
     gdf = gdf.copy()
 
-    # ── Ensure CRS is set ─────────────────────────────────────────────────
+    # ── Ensure CRS ────────────────────────────────────────────────────────
     if gdf.crs is None:
         logger.warning("CRS not set — assuming EPSG:4326")
         gdf = gdf.set_crs(CRS_WGS84)
     elif gdf.crs.to_epsg() != 4326:
-        logger.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
         gdf = gdf.to_crs(CRS_WGS84)
 
-    # ── Remove null geometries ────────────────────────────────────────────
+    # ── Remove null / empty geometries ────────────────────────────────────
     null_mask = gdf.geometry.isna() | gdf.geometry.is_empty
     n_null = null_mask.sum()
     if n_null:
@@ -288,23 +286,13 @@ def validate_coordinates(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     n_invalid = invalid_mask.sum()
     if n_invalid:
         logger.info(f"  Repairing {n_invalid} invalid geometries")
-        gdf.loc[invalid_mask, "geometry"] = gdf.loc[invalid_mask, "geometry"].apply(make_valid)
-
-    # ── Validate lat/lon ranges (Morocco bounding box) ────────────────────
-    lons = gdf.geometry.x
-    lats = gdf.geometry.y
-
-    out_of_bounds = (
-        (lons < MOROCCO_LON_MIN) | (lons > MOROCCO_LON_MAX) |
-        (lats < MOROCCO_LAT_MIN) | (lats > MOROCCO_LAT_MAX)
-    )
-    n_oob = out_of_bounds.sum()
-    if n_oob:
-        logger.warning(
-            f"  Dropping {n_oob} facilities outside Morocco bounding box "
-            f"[{MOROCCO_LON_MIN},{MOROCCO_LON_MAX}] × [{MOROCCO_LAT_MIN},{MOROCCO_LAT_MAX}]"
+        gdf.loc[invalid_mask, "geometry"] = (
+            gdf.loc[invalid_mask, "geometry"].apply(make_valid)
         )
-        gdf = gdf[~out_of_bounds]
+
+    # ── Polygon containment: drop anything outside Morocco ────────────────
+    # This is the authoritative check — removes Algeria, Spain, ocean points
+    gdf = enforce_spatial_integrity(gdf, label="facilities", use_polygon=True)
 
     # ── Remove exact duplicate geometries ─────────────────────────────────
     coord_key = gdf.geometry.apply(lambda g: (round(g.x, 6), round(g.y, 6)))

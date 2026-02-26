@@ -107,8 +107,12 @@ def inject_css() -> None:
     }}
 
     /* ── Hide Streamlit chrome ── */
-    #MainMenu, footer, header {{ visibility: hidden; }}
+    #MainMenu, footer {{ visibility: hidden; }}
     .block-container {{ padding-top: 1rem; padding-bottom: 2rem; }}
+
+    /* ── Ensure sidebar is always interactive ── */
+    [data-testid="stSidebar"] * {{ pointer-events: auto !important; }}
+    [data-testid="stSidebar"] {{ pointer-events: auto !important; }}
 
     /* ── Ministry Banner ── */
     .moh-banner {{
@@ -504,31 +508,18 @@ def render_sidebar(facilities_gdf: gpd.GeoDataFrame) -> dict:
 # FILTERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Morocco strict bounding box — anything outside this is an OSM error
-_MA_LON_MIN, _MA_LON_MAX = -13.2, -0.99
-_MA_LAT_MIN, _MA_LAT_MAX =  27.6, 35.95
-
-
 def apply_filters(
     facilities_gdf: gpd.GeoDataFrame,
     region: str,
     facility_types: list[str],
 ) -> gpd.GeoDataFrame:
-    """Filter facilities by region, type, and strict Morocco bounding box."""
-    gdf = facilities_gdf.copy()
-
-    # Hard bbox guard — drop any stray OSM points outside Morocco
-    lons = gdf.geometry.x
-    lats = gdf.geometry.y
-    in_bbox = (
-        (lons >= _MA_LON_MIN) & (lons <= _MA_LON_MAX) &
-        (lats >= _MA_LAT_MIN) & (lats <= _MA_LAT_MAX)
-    )
-    n_dropped = (~in_bbox).sum()
-    if n_dropped:
-        logger.warning(f"Dropping {n_dropped} facilities outside Morocco bbox")
-    gdf = gdf[in_bbox]
-
+    """
+    Filter facilities by region and type, with polygon containment validation.
+    Removes any OSM artifacts that fall outside Morocco (Algeria, Spain, ocean).
+    """
+    from src.spatial_utils import enforce_spatial_integrity
+    # Enforce Morocco boundary — removes Algeria / ocean artifacts
+    gdf = enforce_spatial_integrity(facilities_gdf, label="display facilities", use_polygon=True)
     if region != "All Regions" and "region" in gdf.columns:
         gdf = gdf[gdf["region"] == region]
     if facility_types:
