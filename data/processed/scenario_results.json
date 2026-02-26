@@ -1,0 +1,265 @@
+{
+  "scenario_config": {
+    "new_facilities": 3,
+    "mobile_units": 5,
+    "telemedicine_kiosks": 20
+  },
+  "baseline": {
+    "coverage_5km": 11.57,
+    "coverage_10km": 25.4,
+    "coverage_20km": 49.31,
+    "avg_distance_km": 56.792
+  },
+  "after": {
+    "coverage_5km": 11.85,
+    "coverage_10km": 26.28,
+    "coverage_20km": 51.33,
+    "avg_distance_km": 30.377
+  },
+  "delta": {
+    "coverage_5km": 0.28,
+    "coverage_10km": 0.88,
+    "coverage_20km": 2.02,
+    "avg_distance_km": -26.415
+  },
+  "interventions": {
+    "new_facilities": {
+      "count": 3,
+      "sites": [
+        {
+          "site_id": "candidate_24",
+          "lat": 33.64056,
+          "lon": -8.04022,
+          "cluster_population": 6249757,
+          "nearest_existing_km": 23.98
+        },
+        {
+          "site_id": "candidate_19",
+          "lat": 34.16938,
+          "lon": -7.02619,
+          "cluster_population": 5426118,
+          "nearest_existing_km": 27.54
+        },
+        {
+          "site_id": "candidate_28",
+          "lat": 33.97129,
+          "lon": -5.05089,
+          "cluster_population": 4286990,
+          "nearest_existing_km": 2.48
+        }
+      ],
+      "type": "permanent",
+      "effective_radius_km": 10.0,
+      "cost_mad": 45000000
+    },
+    "mobile_units": {
+      "count": 5,
+      "sites": [
+        {
+          "site_id": "candidate_21",
+          "lat": 31.65686,
+          "lon": -8.19011,
+          "cluster_population": 3276751,
+          "nearest_existing_km": 7.63
+        },
+        {
+          "site_id": "candidate_08",
+          "lat": 35.58345,
+          "lon": -5.58149,
+          "cluster_population": 2436882,
+          "nearest_existing_km": 14.99
+        },
+        {
+          "site_id": "candidate_12",
+          "lat": 30.48109,
+          "lon": -10.12746,
+          "cluster_population": 2088904,
+          "nearest_existing_km": 47.41
+        },
+        {
+          "site_id": "candidate_03",
+          "lat": 31.93188,
+          "lon": -6.06978,
+          "cluster_population": 1456193,
+          "nearest_existing_km": 13.48
+        },
+        {
+          "site_id": "candidate_18",
+          "lat": 35.36462,
+          "lon": -2.48491,
+          "cluster_population": 1353649,
+          "nearest_existing_km": 31.74
+        }
+      ],
+      "type": "mobile",
+      "effective_radius_km": 15.0,
+      "cost_mad": 4000000
+    },
+    "telemedicine_kiosks": {
+      "count": 20,
+      "sites": [
+        {
+          "site_id": "candidate_27",
+          "lat": 33.63552,
+          "lon": -1.84919,
+          "cluster_population": 1042555,
+          "nearest_existing_km": 53.48
+        },
+        {
+          "site_id": "candidate_23",
+          "lat": 28.90757,
+          "lon": -7.11535,
+          "cluster_population": 859945,
+          "nearest_existing_km": 128.83
+        },
+        {
+          "site_id": "candidate_04",
+          "lat": 32.46129,
+          "lon": -10.52168,
+          "cluster_population": 807553,
+          "nearest_existing_km": 142.42
+        },
+        {
+          "site_id": "candidate_17",
+          "lat": 29.92779,
+          "lon": -3.98468,
+          "cluster_population": 736272,
+          "nearest_existing_km": 177.72
+        },
+        {
+          "site_id": "candidate_05",
+          "lat": 32.20234,
+          "lon": -3.22697,
+          "cluster_population": 730679,
+          "nearest_existing_km": 122.6
+        },
+        {
+          "site_id": "candidate_07",
+          "lat": 28.39912,
+          "lon": -9.58103,
+          "cluster_population": 677570,
+          "nearest_existing_km": 31.61
+        },
+        {
+          "site_id": "candidate_13",
+          "lat": 28.82954,
+          "lon": -12.13799,
+          "cluster_population": 669461,
+          "nearest_existing_km": 99.2
+        },
+        {
+          "site_id": "candidate_16",
+          "lat": 30.62895,
+          "lon": -1.64322,
+          "cluster_population": 623864,
+          "nearest_existing_km": 86.48
+        },
+        {
+          "site_id": "candidate_22",
+          "lat": 28.31339,
+          "lon": -1.86764,
+          "cluster_population": 472114,
+          "nearest_existing_km": 152.82
+        },
+        {
+          "site_id": "candidate_14",
+          "lat": 28.27424,
+          "lon": -5.40386,
+          "cluster_population": 452442,
+          "nearest_existing_km": 200.72
+        },
+        {
+          "site_id": "candidate_02",
+          "lat": 33.98594,
+          "lon": -10.58135,
+          "cluster_population": 418049,
+          "nearest_existing_km": 239.86
+        },
+        {
+          "site_id": "candidate_25",
+          "lat": 30.41713,
+          "lon": -12.32219,
+          "cluster_population": 411694,
+          "nearest_existing_km": 269.09
+        },
+        {
+          "site_id": "candidate_01",
+          "lat": 28.3064,
+          "lon": -3.60536,
+          "cluster_population": 393428,
+          "nearest_existing_km": 281.89
+        },
+        {
+          "site_id": "candidate_09",
+          "lat": 31.79105,
+          "lon": -12.37912,
+          "cluster_population": 368136,
+          "nearest_existing_km": 292.59
+        },
+        {
+          "site_id": "candidate_26",
+          "lat": 35.37731,
+          "lon": -8.07044,
+          "cluster_population": 367343,
+          "nearest_existing_km": 209.06
+        },
+        {
+          "site_id": "candidate_10",
+          "lat": 35.29082,
+          "lon": -9.59771,
+          "cluster_population": 330213,
+          "nearest_existing_km": 299.16
+        },
+        {
+          "site_id": "candidate_15",
+          "lat": 33.17637,
+          "lon": -12.38846,
+          "cluster_population": 323173,
+          "nearest_existing_km": 364.6
+        },
+        {
+          "site_id": "candidate_06",
+          "lat": 35.38763,
+          "lon": -11.11874,
+          "cluster_population": 268374,
+          "nearest_existing_km": 407.31
+        },
+        {
+          "site_id": "candidate_20",
+          "lat": 34.38083,
+          "lon": -12.3999,
+          "cluster_population": 266969,
+          "nearest_existing_km": 434.21
+        },
+        {
+          "site_id": "candidate_11",
+          "lat": 35.48699,
+          "lon": -12.55176,
+          "cluster_population": 205145,
+          "nearest_existing_km": 538.3
+        }
+      ],
+      "type": "telemedicine",
+      "effective_radius_km": 8.0,
+      "cost_mad": 4000000
+    }
+  },
+  "combined_results": {
+    "avg_distance_before_km": 56.792,
+    "avg_distance_after_km": 30.377,
+    "distance_reduction_km": 26.415,
+    "distance_reduction_pct": 46.5,
+    "population_newly_covered_10km": 324168,
+    "coverage_gain_10km_pct": 0.88
+  },
+  "cost_analysis": {
+    "total_cost_mad": 53000000,
+    "total_cost_usd_approx": 5300000,
+    "cost_per_person_reached_mad": 163.5,
+    "n_interventions": 28
+  },
+  "metadata": {
+    "total_population": 37000224,
+    "existing_facilities": 1
+  }
+}
