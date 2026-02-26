@@ -124,16 +124,14 @@ def find_candidate_sites(
     )
     kmeans.fit(pop_coords_m, sample_weight=weights_norm)
 
-    # Cluster centres are in EPSG:3857 (metres) — convert back to WGS84
-    centres_m = kmeans.cluster_centers_
     labels = kmeans.labels_
 
     # ── Build candidate GeoDataFrame ──────────────────────────────────────
-    # Project centres back to WGS84
-    centres_gdf = gpd.GeoDataFrame(
-        geometry=[Point(x, y) for x, y in centres_m],
-        crs=CRS_METRIC,
-    ).to_crs(CRS_WGS84)
+    # IMPORTANT: Snap each centroid to the highest-weight population cell
+    # in its cluster. This guarantees candidates always land on actual
+    # populated land — never in the ocean, outside Morocco, or in the sea.
+    pop_lons = pop_gdf.geometry.x.values
+    pop_lats = pop_gdf.geometry.y.values
 
     records = []
     for site_idx in range(n_sites):
@@ -141,12 +139,13 @@ def find_candidate_sites(
         cluster_pop = float(population[cluster_mask].sum())
         cluster_size = int(cluster_mask.sum())
 
-        lon = centres_gdf.geometry.iloc[site_idx].x
-        lat = centres_gdf.geometry.iloc[site_idx].y
+        # Use the highest-weight cell in the cluster as the candidate location
+        cluster_weights = weights_norm[cluster_mask]
+        cluster_indices = np.where(cluster_mask)[0]
+        best_idx = cluster_indices[np.argmax(cluster_weights)]
 
-        # Snap out-of-bounds centroids to Morocco bbox
-        lon = float(np.clip(lon, MOROCCO_LON_MIN, MOROCCO_LON_MAX))
-        lat = float(np.clip(lat, MOROCCO_LAT_MIN, MOROCCO_LAT_MAX))
+        lon = float(pop_lons[best_idx])
+        lat = float(pop_lats[best_idx])
 
         records.append({
             "site_id": f"candidate_{site_idx + 1:02d}",
