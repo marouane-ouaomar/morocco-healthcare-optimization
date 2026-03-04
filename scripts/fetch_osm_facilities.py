@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
 # Morocco bounding box: south, west, north, east
-MOROCCO_BBOX = (27.6, -13.2, 35.95, -0.99)
+MOROCCO_BBOX = (20.77, -17.1, 35.95, -0.99)  # Full Morocco incl. Western Sahara
 
 # Western Sahara (administered by Morocco) can be included optionally
 MOROCCO_WITH_WS_BBOX = (20.77, -17.1, 35.95, -0.99)
@@ -266,8 +266,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--include-western-sahara",
         action="store_true",
-        default=False,
-        help="Extend bounding box to include Western Sahara",
+        default=True,  # Western Sahara is administered by Morocco — include by default
+        help="Extend bounding box to include Western Sahara (default: True)",
     )
     parser.add_argument(
         "--dry-run",

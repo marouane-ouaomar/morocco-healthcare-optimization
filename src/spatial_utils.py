@@ -14,6 +14,7 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 from shapely.geometry import MultiPolygon, Point, Polygon, shape
+from shapely.validation import make_valid
 
 logger = logging.getLogger(__name__)
 
@@ -28,15 +29,23 @@ MOROCCO_LAT_MIN, MOROCCO_LAT_MAX =  20.77, 35.95
 @lru_cache(maxsize=1)
 def load_morocco_polygon() -> Polygon | MultiPolygon:
     """
-    Load and cache the Morocco boundary polygon.
+    Load and cache the Morocco boundary MultiPolygon.
+
+    Uses make_valid() to fix any self-intersections before returning,
+    so callers never receive an invalid geometry.
 
     Returns:
         Shapely Polygon or MultiPolygon for Morocco.
     """
     if BOUNDARY_PATH.exists():
         gdf = gpd.read_file(BOUNDARY_PATH).to_crs("EPSG:4326")
-        geom = gdf.union_all() if hasattr(gdf, "union_all") else gdf.unary_union
-        logger.info(f"Loaded Morocco boundary from {BOUNDARY_PATH}")
+        # Take geometry directly — avoids union_all() on potentially invalid geom
+        raw_geom = gdf.geometry.iloc[0]
+        # make_valid() repairs self-intersections cleanly (Shapely 1.8+)
+        geom = make_valid(raw_geom)
+        if not geom.is_valid:
+            logger.error("Morocco boundary geometry still invalid after make_valid()")
+        logger.info(f"Loaded Morocco boundary: {geom.geom_type}, valid={geom.is_valid}")
         return geom
     else:
         logger.warning(
@@ -99,8 +108,12 @@ def enforce_spatial_integrity(
     # Step 3 — polygon containment
     if use_polygon and len(gdf) > 0:
         morocco = load_morocco_polygon()
-        # Vectorised containment check
-        within_mask = gdf.geometry.within(morocco)
+        # Use covers() not within() — within() is strict interior only, so
+        # points exactly on the polygon boundary return False and are silently
+        # dropped. This kills valid southern facilities (Laayoune, Dakhla,
+        # Tan-Tan) that sit near polygon edges. covers() correctly returns
+        # True for both interior AND boundary points.
+        within_mask = gdf.geometry.apply(lambda geom: morocco.covers(geom))
         n_outside_polygon = (~within_mask).sum()
         if n_outside_polygon > 0:
             logger.warning(

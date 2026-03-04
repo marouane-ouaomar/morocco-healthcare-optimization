@@ -10,8 +10,8 @@ Supports three intervention types:
                           reduced effective coverage (urban bias)
 
 Public API:
-    run_scenario(pop_gdf, facilities_gdf, ...) → dict
-    run_scenario_from_files(...)               → dict
+    run_scenario(pop_gdf, facilities_gdf, ...) -> dict
+    run_scenario_from_files(...)               -> dict
 """
 
 import json
@@ -30,6 +30,7 @@ from src.kmeans_placement import (
     _metric_coords,
     _nearest_distances_km,
 )
+from src.spatial_utils import load_morocco_polygon
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +47,69 @@ TELEMEDICINE_COVERAGE_RADIUS_KM = 8.0   # Kiosks useful mainly in semi-urban are
 TELEMEDICINE_URBAN_BIAS = 0.7           # 70% of kiosk benefit goes to urban pop
 
 
-# ── Cost model (approximate MAD values for scenario ROI) ─────────────────────
+# -- Cost model (approximate MAD values for scenario ROI) ---------------------
 COST_PER_FACILITY_MAD = 15_000_000      # ~15M MAD for a new primary care centre
 COST_PER_MOBILE_UNIT_MAD = 800_000      # ~800K MAD per mobile unit (annual)
 COST_PER_KIOSK_MAD = 200_000            # ~200K MAD per telemedicine kiosk
 
 
-# ── run_scenario ──────────────────────────────────────────────────────────────
+# -- Snap helper ---------------------------------------------------------------
+
+def _snap_to_valid_popgrid(
+    candidates: gpd.GeoDataFrame,
+    pop_gdf: gpd.GeoDataFrame,
+) -> gpd.GeoDataFrame:
+    """
+    Snap any candidate site to the nearest popgrid cell inside Morocco.
+
+    Uses the same Shapely polygon that drives the popgrid and facility
+    filtering, so there is no mismatch between what enters the pipeline
+    and what gets placed on the map.
+    """
+    from scipy.spatial import KDTree
+
+    morocco_poly = load_morocco_polygon()
+
+    def _is_interior(lon: float, lat: float) -> bool:
+        return morocco_poly.contains(Point(lon, lat))
+
+    pop_lons = pop_gdf.geometry.x.values
+    pop_lats = pop_gdf.geometry.y.values
+
+    valid_mask = np.array([_is_interior(lon, lat) for lon, lat in zip(pop_lons, pop_lats)])
+    valid_lons = pop_lons[valid_mask]
+    valid_lats = pop_lats[valid_mask]
+
+    if len(valid_lons) == 0:
+        logger.warning("No valid popgrid cells inside Morocco polygon — cannot snap.")
+        return candidates
+
+    logger.info(f"Snap pool: {valid_mask.sum()} cells from {len(pop_lons)} total")
+    valid_tree = KDTree(np.column_stack([valid_lons, valid_lats]))
+
+    new_geoms = []
+    n_snapped = 0
+    for geom in candidates.geometry:
+        if _is_interior(geom.x, geom.y):
+            new_geoms.append(geom)
+        else:
+            _, idx = valid_tree.query([geom.x, geom.y], k=1)
+            new_geoms.append(Point(valid_lons[idx], valid_lats[idx]))
+            n_snapped += 1
+
+    if n_snapped > 0:
+        logger.warning(f"Snapped {n_snapped} site(s) to nearest valid Morocco cell.")
+        candidates = candidates.copy()
+        candidates["geometry"] = new_geoms
+        if "lon" in candidates.columns:
+            candidates["lon"] = [g.x for g in new_geoms]
+        if "lat" in candidates.columns:
+            candidates["lat"] = [g.y for g in new_geoms]
+
+    return candidates
+
+
+# -- run_scenario --------------------------------------------------------------
 
 def run_scenario(
     pop_gdf: gpd.GeoDataFrame,
@@ -84,7 +141,7 @@ def run_scenario(
             scenario_config, baseline, interventions,
             combined_results, cost_analysis, metadata
     """
-    logger.info("═══════════ Scenario Simulation ═══════════")
+    logger.info("=========== Scenario Simulation ===========")
     logger.info(
         f"Config: {new_facilities} facilities, "
         f"{mobile_units} mobile units, "
@@ -96,7 +153,7 @@ def run_scenario(
     pop_coords_m = _metric_coords(pop_gdf)
     existing_coords_m = _metric_coords(facilities_gdf)
 
-    # ── Baseline ──────────────────────────────────────────────────────────
+    # -- Baseline --------------------------------------------------------------
     dist_baseline = _nearest_distances_km(pop_coords_m, existing_coords_m)
     avg_dist_baseline = float(np.average(dist_baseline, weights=population))
     baseline_coverage = {
@@ -106,13 +163,13 @@ def run_scenario(
         for r in radii_km
     }
 
-    # ── Place each intervention type ──────────────────────────────────────
+    # -- Place each intervention type ------------------------------------------
     all_new_points: list[Point] = []
     interventions: dict = {}
 
     total_interventions = new_facilities + mobile_units + telemedicine_kiosks
     if total_interventions == 0:
-        logger.warning("No interventions specified — returning baseline only")
+        logger.warning("No interventions specified -- returning baseline only")
         return _build_result(
             scenario_config={
                 "new_facilities": 0, "mobile_units": 0, "telemedicine_kiosks": 0
@@ -134,6 +191,13 @@ def run_scenario(
         n_sites=total_interventions,
         random_state=random_state,
     )
+
+    # -- Snap boundary-leaked sites to valid popgrid cells --------------------
+    # The boundary polygon is coarse (~100 vertices). Cells near its edges
+    # (e.g. Tata province at lon=-8.05, lat=28.55) can pass covers() yet
+    # visually appear outside Morocco on the basemap. Snap before slicing
+    # so no out-of-bounds coordinates reach the map or the records.
+    candidates_all = _snap_to_valid_popgrid(candidates_all, pop_gdf)
 
     idx = 0
 
@@ -176,7 +240,7 @@ def run_scenario(
         }
         all_new_points.extend(kiosk_candidates.geometry.tolist())
 
-    # ── Combined AFTER distances ──────────────────────────────────────────
+    # -- Combined AFTER distances ----------------------------------------------
     all_new_gdf = gpd.GeoDataFrame(geometry=all_new_points, crs=CRS_WGS84)
     combined_gdf = gpd.GeoDataFrame(
         geometry=pd.concat(
@@ -235,15 +299,11 @@ def _build_result(
     }
     delta_distance = round(avg_dist_after - baseline["avg_distance_km"], 3)
 
-    # Population newly covered at 10 km threshold
     newly_covered_10km = float(
         population[(dist_after <= 10.0) & (dist_before > 10.0)].sum()
     )
 
-    # Total cost
-    total_cost_mad = sum(
-        v.get("cost_mad", 0) for v in interventions.values()
-    )
+    total_cost_mad = sum(v.get("cost_mad", 0) for v in interventions.values())
     total_new_interventions = sum(v["count"] for v in interventions.values())
 
     cost_per_person_mad = (
@@ -269,7 +329,7 @@ def _build_result(
         },
         "cost_analysis": {
             "total_cost_mad": total_cost_mad,
-            "total_cost_usd_approx": round(total_cost_mad / 10),  # ~10 MAD/USD
+            "total_cost_usd_approx": round(total_cost_mad / 10),
             "cost_per_person_reached_mad": cost_per_person_mad,
             "n_interventions": total_new_interventions,
         },
@@ -277,23 +337,23 @@ def _build_result(
             "total_population": round(total_pop),
             "existing_facilities": int(
                 scenario_config.get("new_facilities", 0) == 0
-                or True  # placeholder — filled by caller
+                or True
             ),
         },
     }
 
-    logger.info("── Scenario Results ────────────────────────────────")
-    logger.info(f"  Avg distance: {baseline['avg_distance_km']:.2f} → {avg_dist_after:.2f} km")
+    logger.info("-- Scenario Results -----------------------------------------")
+    logger.info(f"  Avg distance: {baseline['avg_distance_km']:.2f} -> {avg_dist_after:.2f} km")
     for r in radii_km:
         k = f"coverage_{int(r)}km"
         logger.info(
-            f"  Coverage {r:.0f}km: {baseline[k]:.1f}% → {after_coverage[k]:.1f}% "
+            f"  Coverage {r:.0f}km: {baseline[k]:.1f}% -> {after_coverage[k]:.1f}% "
             f"(+{delta_coverage[k]:.1f}%)"
         )
     logger.info(f"  Newly covered (10km): {newly_covered_10km:,.0f} people")
     if cost_per_person_mad:
         logger.info(f"  Cost per person reached: {cost_per_person_mad:.0f} MAD")
-    logger.info("────────────────────────────────────────────────────")
+    logger.info("------------------------------------------------------------")
 
     return result
 
@@ -312,7 +372,7 @@ def _candidates_to_records(gdf: gpd.GeoDataFrame) -> list[dict]:
     return records
 
 
-# ── Pipeline runner ───────────────────────────────────────────────────────────
+# -- Pipeline runner -----------------------------------------------------------
 
 def run_scenario_from_files(
     new_facilities: int = 3,
@@ -324,17 +384,6 @@ def run_scenario_from_files(
 ) -> dict:
     """
     Load processed data, run a scenario, and save results to JSON.
-
-    Args:
-        new_facilities: Number of permanent new facilities.
-        mobile_units: Number of mobile units.
-        telemedicine_kiosks: Number of telemedicine kiosks.
-        facilities_path: Path to processed facilities GeoJSON.
-        popgrid_path: Path to processed population grid GeoJSON.
-        output_path: Path to save scenario_results.json.
-
-    Returns:
-        Scenario results dict (also saved to output_path).
     """
     if not facilities_path.exists():
         raise FileNotFoundError(f"{facilities_path} not found. Run data_prep.run_pipeline() first.")
@@ -356,5 +405,5 @@ def run_scenario_from_files(
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
-    logger.info(f"✅ Scenario results saved → {output_path}")
+    logger.info(f"Scenario results saved -> {output_path}")
     return results

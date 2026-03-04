@@ -408,6 +408,7 @@ def _synthetic_population_grid(resolution: float) -> gpd.GeoDataFrame:
 
     # (name, lon, lat, relative_weight)
     centres = [
+        # North / major cities
         ("Casablanca",  -7.59, 33.57, 4.0),
         ("Rabat",       -6.85, 34.02, 1.8),
         ("Fès",         -4.99, 34.04, 1.5),
@@ -421,7 +422,23 @@ def _synthetic_population_grid(resolution: float) -> gpd.GeoDataFrame:
         ("Safi",        -9.23, 32.30, 0.4),
         ("El Jadida",   -8.51, 33.26, 0.4),
         ("Béni Mellal", -6.36, 32.34, 0.4),
-        ("Laâyoune",   -13.20, 27.15, 0.2),
+        ("Nador",       -2.93, 35.17, 0.4),
+        ("Khouribga",   -6.91, 32.88, 0.3),
+        ("Settat",      -7.62, 33.00, 0.3),
+        ("Essaouira",   -9.76, 31.51, 0.3),
+        # South / Souss-Massa / Drâa-Tafilalet
+        ("Ouarzazate",  -6.89, 30.92, 0.3),
+        ("Tiznit",      -9.73, 29.69, 0.3),
+        ("Taroudant",   -8.88, 30.47, 0.3),
+        ("Zagora",      -5.84, 30.33, 0.2),
+        ("Errachidia",  -4.42, 31.93, 0.3),
+        ("Guelmim",    -10.06, 28.99, 0.2),
+        ("Tan-Tan",    -11.10, 28.44, 0.2),
+        # Western Sahara / Guelmim-Oued Noun
+        ("Laâyoune",   -13.20, 27.15, 0.3),
+        ("Smara",      -11.67, 26.73, 0.1),
+        ("Boujdour",   -14.50, 26.12, 0.1),
+        ("Dakhla",     -15.93, 23.68, 0.2),
     ]
 
     # Build grid
@@ -448,7 +465,35 @@ def _synthetic_population_grid(resolution: float) -> gpd.GeoDataFrame:
     df = pd.DataFrame({"lon": grid_lons, "lat": grid_lats, "population": population})
     df = df[df["population"] > 10].reset_index(drop=True)  # Remove near-zero cells
 
-    return _df_to_grid_gdf(df)
+    gdf = _df_to_grid_gdf(df)
+
+    # ── Critical: clip grid to Morocco polygon ────────────────────────────
+    # The Gaussian grid covers the full bounding box including the Atlantic
+    # Ocean and parts of Algeria. Cells near coastal cities (Casablanca,
+    # Rabat, Agadir) can fall offshore. Filtering here ensures the population
+    # grid — and any facilities snapped to it — are always on land.
+    from src.spatial_utils import enforce_spatial_integrity
+    n_before = len(gdf)
+    gdf = enforce_spatial_integrity(gdf, label="population grid", use_polygon=True)
+    n_after = len(gdf)
+    logger.info(
+        f"Population grid: {n_before} cells → {n_after} after Morocco polygon clip "
+        f"({n_before - n_after} ocean/border cells removed)"
+    )
+
+    # Renormalize to 37M AFTER clipping — ocean cells were carrying population weight
+    # that must be redistributed to valid land cells
+    total_target = 37_000_000
+    current_total = gdf["population"].sum()
+    if current_total > 0:
+        scale = total_target / current_total
+        gdf = gdf.copy()
+        gdf["population"] = (gdf["population"] * scale).round(1)
+        logger.info(
+            f"Population renormalized: {current_total/1e6:.1f}M → {gdf['population'].sum()/1e6:.1f}M "
+            f"(scale factor: {scale:.3f})"
+        )
+    return gdf
 
 
 def _df_to_grid_gdf(df: pd.DataFrame) -> gpd.GeoDataFrame:
