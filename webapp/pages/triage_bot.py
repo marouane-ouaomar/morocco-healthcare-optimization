@@ -156,21 +156,44 @@ def geolocation_html() -> str:
 <script>
 function go(){
   var btn=document.getElementById("btn"),st=document.getElementById("st");
-  var geo=window.parent.navigator.geolocation||navigator.geolocation;
+
+  // Walk up to the true top-level window (works on localhost AND Streamlit Cloud)
+  var topWin = window;
+  try { while (topWin !== topWin.parent) { topWin = topWin.parent; } } catch(e) {}
+
+  var geo = topWin.navigator.geolocation || navigator.geolocation;
   if(!geo){st.textContent="❌ Geolocation not supported.";st.className="err";return;}
+
   btn.disabled=true;btn.textContent="⏳ Locating...";
   st.textContent="Check your browser address bar for the permission prompt...";
+
   geo.getCurrentPosition(
     function(p){
       var lat=p.coords.latitude.toFixed(6),lon=p.coords.longitude.toFixed(6);
       st.textContent="✅ Got it — updating...";st.className="ok";
-      var url=new URL(window.parent.location.href);
-      url.searchParams.set("user_lat",lat);url.searchParams.set("user_lon",lon);
-      window.parent.location.href=url.toString();
+
+      try {
+        // Build new URL from the top-level window location
+        var url=new URL(topWin.location.href);
+        url.searchParams.set("user_lat",lat);
+        url.searchParams.set("user_lon",lon);
+        topWin.location.href=url.toString();
+      } catch(e) {
+        // Fallback: try window.top directly
+        try {
+          var url2=new URL(window.top.location.href);
+          url2.searchParams.set("user_lat",lat);
+          url2.searchParams.set("user_lon",lon);
+          window.top.location.href=url2.toString();
+        } catch(e2) {
+          st.textContent="❌ Could not update location. Try the manual entry below.";
+          st.className="err";
+        }
+      }
     },
     function(e){
       btn.disabled=false;btn.textContent="📍 Share My Location";
-      var m={1:"❌ Permission denied — allow in the address bar 🔒",
+      var m={1:"❌ Permission denied — click the 🔒 icon in the address bar.",
              2:"❌ Position unavailable.",3:"❌ Timed out."};
       st.textContent=m[e.code]||"❌ Error.";st.className="err";
     },
@@ -468,5 +491,5 @@ with st.sidebar:
     <div style='font-size:.72rem;color:{C["muted"]};line-height:1.6;'>
       <b> Demo only</b><br>
       Not a medical device.<br>
-      Emergency: <b>SAMU 15</b> / <b>112</b>
+      Emergency: <b>Call 15</b> / <b>112</b>
     </div>""", unsafe_allow_html=True)
