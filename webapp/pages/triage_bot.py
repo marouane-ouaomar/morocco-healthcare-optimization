@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.facility_locator import LEVEL_FACILITY_TYPES, find_nearest
 from src.triage_engine import EMERGENCY_NUMBERS, AdviceLevel, TriageResponse, triage
+from streamlit_js_eval import get_geolocation
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -124,83 +125,66 @@ def load_facilities_cached():
 
 facilities_gdf = load_facilities_cached()
 
-# ── Read location from query params ──────────────────────────────────────────
-params = st.query_params
-user_lat = user_lon = None
-try:
-    if "user_lat" in params and "user_lon" in params:
-        user_lat = float(params["user_lat"])
-        user_lon = float(params["user_lon"])
-        if not (21.0 <= user_lat <= 36.0 and -18.0 <= user_lon <= -0.5):
-            user_lat = user_lon = None
-except (ValueError, TypeError):
-    pass
+# ── Location state ────────────────────────────────────────────────────────────
+# Persisted in session_state so it survives reruns without re-requesting GPS.
+if "user_lat" not in st.session_state:
+    st.session_state.user_lat = None
+if "user_lon" not in st.session_state:
+    st.session_state.user_lon = None
 
-# ── Geolocation component ─────────────────────────────────────────────────────
-def geolocation_html() -> str:
-    return """<!DOCTYPE html><html><head><meta charset="utf-8">
-<style>
-  *{margin:0;padding:0;box-sizing:border-box;font-family:"Segoe UI",sans-serif;}
-  body{background:transparent;padding:2px 0;}
-  #btn{background:#1F4E79;color:white;border:none;border-radius:6px;
-    padding:8px 16px;font-size:12.5px;font-weight:600;cursor:pointer;
-    letter-spacing:.4px;transition:background .2s;}
-  #btn:hover{background:#2F8F9D;}
-  #btn:disabled{background:#aaa;cursor:default;}
-  #st{font-size:11.5px;color:#5D6D7E;margin-top:6px;}
-  .ok{color:#1E8449!important;font-weight:600;}
-  .err{color:#922B21!important;}
-</style></head><body>
-<button id="btn" onclick="go()">📍 Share My Location</button>
-<div id="st">Grant location access to find nearby facilities.</div>
-<script>
-function go(){
-  var btn=document.getElementById("btn"),st=document.getElementById("st");
+user_lat = st.session_state.user_lat
+user_lon = st.session_state.user_lon
 
-  // Walk up to the true top-level window (works on localhost AND Streamlit Cloud)
-  var topWin = window;
-  try { while (topWin !== topWin.parent) { topWin = topWin.parent; } } catch(e) {}
+# ── Geolocation widget ───────────────────────────────────────────────────────
+def render_geolocation_widget() -> None:
+    """
+    Request device location using streamlit-js-eval.
+    Runs in the main page context (not a sandboxed iframe) so it works
+    on Streamlit Community Cloud.
+    """
+    col_btn, col_status = st.columns([1, 2])
+    with col_btn:
+        request = st.button("📍 Share My Location", use_container_width=True, key="geo_btn")
+    with col_status:
+        st.markdown(
+            f"<div style='font-size:.78rem;color:{C['muted']};padding-top:8px;'>"
+            "Tap to share GPS location</div>",
+            unsafe_allow_html=True,
+        )
 
-  var geo = topWin.navigator.geolocation || navigator.geolocation;
-  if(!geo){st.textContent="❌ Geolocation not supported.";st.className="err";return;}
+    if request or st.session_state.get("_geo_pending"):
+        st.session_state["_geo_pending"] = True
+        with st.spinner("Requesting location…"):
+            loc = get_geolocation()
 
-  btn.disabled=true;btn.textContent="⏳ Locating...";
-  st.textContent="Check your browser address bar for the permission prompt...";
-
-  geo.getCurrentPosition(
-    function(p){
-      var lat=p.coords.latitude.toFixed(6),lon=p.coords.longitude.toFixed(6);
-      st.textContent="✅ Got it — updating...";st.className="ok";
-
-      try {
-        // Build new URL from the top-level window location
-        var url=new URL(topWin.location.href);
-        url.searchParams.set("user_lat",lat);
-        url.searchParams.set("user_lon",lon);
-        topWin.location.href=url.toString();
-      } catch(e) {
-        // Fallback: try window.top directly
-        try {
-          var url2=new URL(window.top.location.href);
-          url2.searchParams.set("user_lat",lat);
-          url2.searchParams.set("user_lon",lon);
-          window.top.location.href=url2.toString();
-        } catch(e2) {
-          st.textContent="❌ Could not update location. Try the manual entry below.";
-          st.className="err";
-        }
-      }
-    },
-    function(e){
-      btn.disabled=false;btn.textContent="📍 Share My Location";
-      var m={1:"❌ Permission denied — click the 🔒 icon in the address bar.",
-             2:"❌ Position unavailable.",3:"❌ Timed out."};
-      st.textContent=m[e.code]||"❌ Error.";st.className="err";
-    },
-    {enableHighAccuracy:true,timeout:10000,maximumAge:60000}
-  );
-}
-</script></body></html>"""
+        if loc and "coords" in loc:
+            lat = loc["coords"].get("latitude")
+            lon = loc["coords"].get("longitude")
+            if lat is not None and lon is not None:
+                # Validate Morocco bounding box (relaxed — allow any global coords for testing)
+                st.session_state.user_lat = round(float(lat), 6)
+                st.session_state.user_lon = round(float(lon), 6)
+                st.session_state["_geo_pending"] = False
+                st.rerun()
+        elif loc is None:
+            st.markdown(
+                "<div style='font-size:.78rem;color:#922B21;'>"
+                "❌ Location denied or unavailable. "
+                "Enter coordinates manually below.</div>",
+                unsafe_allow_html=True,
+            )
+            # Manual fallback
+            with st.expander("📝 Enter coordinates manually"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    mlat = st.number_input("Latitude", value=33.5731, format="%.4f", key="manual_lat")
+                with c2:
+                    mlon = st.number_input("Longitude", value=-7.5898, format="%.4f", key="manual_lon")
+                if st.button("✅ Use these coordinates", key="manual_confirm"):
+                    st.session_state.user_lat = mlat
+                    st.session_state.user_lon = mlon
+                    st.session_state["_geo_pending"] = False
+                    st.rerun()
 
 # ── HTML helpers ──────────────────────────────────────────────────────────────
 def emergency_html(advice_text: str) -> str:
@@ -317,12 +301,14 @@ def render_message(msg: dict) -> None:
             )
 
         elif kind == "geolocation":
-            components.html(geolocation_html(), height=72, scrolling=False)
+            render_geolocation_widget()
 
         elif kind == "location_confirmed":
+            lat_d = msg.get("lat") or st.session_state.get("user_lat", 0)
+            lon_d = msg.get("lon") or st.session_state.get("user_lon", 0)
             st.markdown(
                 f"<div style='font-size:.8rem;color:#1E8449;font-weight:600;'>"
-                f"✅ Location captured: {msg['lat']:.4f}°N, {msg['lon']:.4f}°E</div>",
+                f"✅ Location captured: {lat_d:.4f}°N, {lon_d:.4f}°E</div>",
                 unsafe_allow_html=True,
             )
 
@@ -375,7 +361,7 @@ if user_lat is not None and st.session_state.triage_done and st.session_state.la
             advice_level=level, n=3, max_distance_km=150.0,
         )
         loc_msg = {"role": "assistant", "kind": "location_confirmed",
-                   "lat": user_lat, "lon": user_lon}
+                   "lat": float(user_lat), "lon": float(user_lon)}
         st.session_state.messages.append(loc_msg)
         render_message(loc_msg)
 
@@ -424,6 +410,9 @@ if prompt := st.chat_input("Describe your symptoms…"):
                 height=210, scrolling=False,
             )
 
+        # Refresh from session_state in case location arrived this rerun
+        user_lat = st.session_state.user_lat
+        user_lon = st.session_state.user_lon
         if user_lat is not None and facilities_gdf is not None:
             nearby = find_nearest(
                 user_lat=user_lat, user_lon=user_lon,
@@ -459,7 +448,7 @@ if prompt := st.chat_input("Describe your symptoms…"):
             st.markdown(geo_prompt["content"])
             geo_msg = {"role":"assistant","kind":"geolocation","content":""}
             st.session_state.messages.append(geo_msg)
-            components.html(geolocation_html(), height=72, scrolling=False)
+            render_geolocation_widget()
 
 # ── Sidebar controls ──────────────────────────────────────────────────────────
 with st.sidebar:
@@ -473,7 +462,9 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.triage_done = False
         st.session_state.last_level = None
-        st.query_params.clear()
+        st.session_state.user_lat = None
+        st.session_state.user_lon = None
+        st.session_state["_geo_pending"] = False
         st.rerun()
 
     if user_lat is not None:
@@ -482,8 +473,10 @@ with st.sidebar:
             f"📍 {user_lat:.4f}°N, {user_lon:.4f}°E</div>",
             unsafe_allow_html=True,
         )
-        if st.button("📍 Reset location", use_container_width=True):
-            st.query_params.clear()
+        if st.button(" Reset location", use_container_width=True):
+            st.session_state.user_lat = None
+            st.session_state.user_lon = None
+            st.session_state["_geo_pending"] = False
             st.rerun()
 
     st.markdown("---")
