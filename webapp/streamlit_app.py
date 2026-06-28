@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -30,6 +31,7 @@ from src.access_metrics import (
     population_weighted_distance,
     population_per_facility_ratio,
 )
+from src.data_prep import MOROCCO_REGIONS
 from src.scenario_simulator import run_scenario
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -86,8 +88,7 @@ MOROCCO_ZOOM   = 4.8
 def configure_page() -> None:
     """Set Streamlit page config — must be first Streamlit call."""
     st.set_page_config(
-        page_title="Morocco Healthcare Access · Dashboard",
-        page_icon="🏥",
+        page_title="Morocco Healthcare Access",
         layout="wide",
         initial_sidebar_state="expanded",
         menu_items={
@@ -99,10 +100,15 @@ def configure_page() -> None:
 
 
 def inject_css() -> None:
-    """Inject global CSS for Ministry of Health design system."""
+    """Inject global CSS — Ministry of Health palette with modern glass aesthetic."""
     st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600;700&family=Source+Serif+4:wght@600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600;700&family=Source+Serif+4:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+    /* ── Ambient background ── */
+    .stApp {{
+        background: linear-gradient(165deg, #eef4fa 0%, #e4eef6 35%, #f2f7fb 70%, #eaf2f8 100%);
+    }}
 
     /* ── Base ── */
     html, body, [class*="css"] {{
@@ -112,7 +118,11 @@ def inject_css() -> None:
 
     /* ── Hide Streamlit chrome ── */
     #MainMenu, footer {{ visibility: hidden; }}
-    .block-container {{ padding-top: 1rem; padding-bottom: 2rem; }}
+    .block-container {{
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+        max-width: 1400px;
+    }}
 
     /* ── Ensure sidebar is always interactive ── */
     [data-testid="stSidebar"] * {{ pointer-events: auto !important; }}
@@ -120,34 +130,47 @@ def inject_css() -> None:
 
     /* ── Ministry Banner ── */
     .moh-banner {{
-        background: linear-gradient(135deg, {COLOR['primary']} 0%, #163d61 100%);
-        padding: 20px 32px;
-        border-radius: 8px;
+        background: linear-gradient(135deg, {COLOR['primary']} 0%, #163d61 55%, #1a4a70 100%);
+        padding: 22px 32px;
+        border-radius: 10px;
         margin-bottom: 6px;
-        border-left: 6px solid {COLOR['teal']};
-        box-shadow: 0 4px 16px rgba(31,78,121,0.18);
+        border-left: 5px solid {COLOR['teal']};
+        box-shadow: 0 8px 32px rgba(31,78,121,0.22), inset 0 1px 0 rgba(255,255,255,0.08);
+        position: relative;
+        overflow: hidden;
+    }}
+    .moh-banner::after {{
+        content: '';
+        position: absolute;
+        top: 0; right: 0;
+        width: 45%; height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(47,143,157,0.07));
+        pointer-events: none;
     }}
     .moh-banner h1 {{
         font-family: 'Source Serif 4', serif;
         color: white;
-        font-size: 1.55rem;
+        font-size: 1.5rem;
         font-weight: 700;
         margin: 0 0 4px 0;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.6px;
         line-height: 1.2;
+        position: relative;
     }}
     .moh-banner p {{
         color: rgba(255,255,255,0.78);
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         margin: 0;
         font-weight: 300;
-        letter-spacing: 0.8px;
+        letter-spacing: 1.4px;
         text-transform: uppercase;
+        position: relative;
     }}
     .moh-flag {{
         display: flex;
         gap: 3px;
         margin-bottom: 10px;
+        position: relative;
     }}
     .moh-flag span {{
         display: inline-block;
@@ -155,53 +178,83 @@ def inject_css() -> None:
         border-radius: 2px;
     }}
 
-    /* ── Metric cards ── */
-    .metric-card {{
-        background: {COLOR['white']};
+    /* ── Status strip ── */
+    .status-strip {{
+        background: rgba(255,255,255,0.85);
+        backdrop-filter: blur(10px);
         border: 1px solid {COLOR['border']};
         border-radius: 8px;
+        padding: 10px 18px;
+        font-size: 0.78rem;
+        color: {COLOR['muted']};
+        margin-bottom: 14px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px 32px;
+        box-shadow: 0 2px 8px rgba(31,78,121,0.06);
+    }}
+    .status-strip b {{ color: {COLOR['primary']}; font-weight: 600; }}
+    .status-strip .sep {{
+        width: 1px;
+        background: {COLOR['border']};
+        align-self: stretch;
+    }}
+
+    /* ── Metric cards ── */
+    .metric-card {{
+        background: rgba(255,255,255,0.92);
+        backdrop-filter: blur(8px);
+        border: 1px solid {COLOR['border']};
+        border-radius: 10px;
         padding: 16px 20px;
         margin-bottom: 10px;
         border-left: 4px solid {COLOR['teal']};
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }}
+    .metric-card:hover {{
+        transform: translateY(-1px);
+        box-shadow: 0 6px 20px rgba(31,78,121,0.1);
     }}
     .metric-card.good  {{ border-left-color: {COLOR['success']}; }}
     .metric-card.warn  {{ border-left-color: {COLOR['warning']}; }}
     .metric-card.bad   {{ border-left-color: {COLOR['danger']}; }}
 
     .metric-label {{
-        font-size: 0.72rem;
+        font-size: 0.68rem;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 1.2px;
+        letter-spacing: 1.4px;
         color: {COLOR['muted']};
         margin-bottom: 4px;
     }}
     .metric-value {{
-        font-family: 'Source Serif 4', serif;
-        font-size: 2rem;
-        font-weight: 700;
+        font-family: 'JetBrains Mono', 'Source Serif 4', serif;
+        font-size: 1.85rem;
+        font-weight: 600;
         color: {COLOR['dark_text']};
         line-height: 1;
     }}
     .metric-sub {{
-        font-size: 0.78rem;
+        font-size: 0.76rem;
         color: {COLOR['muted']};
         margin-top: 4px;
     }}
 
     /* ── Before/After scenario cards ── */
     .scenario-card {{
-        background: {COLOR['white']};
+        background: rgba(255,255,255,0.92);
+        backdrop-filter: blur(8px);
         border: 1px solid {COLOR['border']};
-        border-radius: 8px;
+        border-radius: 10px;
         padding: 20px;
         height: 100%;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
     }}
-    .scenario-card.before {{ border-top: 4px solid {COLOR['danger']}; }}
-    .scenario-card.after  {{ border-top: 4px solid {COLOR['success']}; }}
+    .scenario-card.before {{ border-top: 3px solid {COLOR['danger']}; }}
+    .scenario-card.after  {{ border-top: 3px solid {COLOR['success']}; }}
     .scenario-title {{
-        font-size: 0.75rem;
+        font-size: 0.72rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 1.5px;
@@ -215,10 +268,10 @@ def inject_css() -> None:
 
     /* ── Section headers ── */
     .section-header {{
-        font-size: 0.72rem;
+        font-size: 0.7rem;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 2px;
+        letter-spacing: 2.2px;
         color: {COLOR['primary']};
         border-bottom: 2px solid {COLOR['teal']};
         padding-bottom: 6px;
@@ -227,14 +280,14 @@ def inject_css() -> None:
 
     /* ── Sidebar ── */
     [data-testid="stSidebar"] {{
-        background: {COLOR['light_bg']};
+        background: linear-gradient(180deg, {COLOR['light_bg']} 0%, #e0ecf4 100%);
         border-right: 1px solid {COLOR['border']};
     }}
     [data-testid="stSidebar"] .stSelectbox label,
     [data-testid="stSidebar"] .stMultiSelect label,
     [data-testid="stSidebar"] .stSlider label,
     [data-testid="stSidebar"] .stNumberInput label {{
-        font-size: 0.75rem;
+        font-size: 0.72rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 1px;
@@ -243,40 +296,50 @@ def inject_css() -> None:
 
     /* ── Tabs ── */
     .stTabs [data-baseweb="tab-list"] {{
-        gap: 4px;
+        gap: 6px;
         border-bottom: 2px solid {COLOR['border']};
+        background: rgba(255,255,255,0.5);
+        border-radius: 8px 8px 0 0;
+        padding: 4px 4px 0 4px;
     }}
     .stTabs [data-baseweb="tab"] {{
-        font-size: 0.78rem;
+        font-size: 0.76rem;
         font-weight: 600;
-        letter-spacing: 0.8px;
+        letter-spacing: 0.6px;
         text-transform: uppercase;
-        padding: 8px 20px;
-        border-radius: 4px 4px 0 0;
+        padding: 10px 22px;
+        border-radius: 6px 6px 0 0;
         color: {COLOR['muted']};
+        background: transparent;
+        border: 1px solid transparent;
+        transition: all 0.15s ease;
     }}
     .stTabs [aria-selected="true"] {{
         background: {COLOR['primary']} !important;
         color: white !important;
+        box-shadow: 0 4px 12px rgba(31,78,121,0.25);
+        border-color: {COLOR['primary']} !important;
     }}
 
     /* ── Buttons ── */
     .stButton > button {{
-        background: {COLOR['primary']};
+        background: linear-gradient(135deg, {COLOR['primary']} 0%, #163d61 100%);
         color: white;
         border: none;
-        border-radius: 4px;
+        border-radius: 6px;
         font-weight: 600;
-        font-size: 0.78rem;
+        font-size: 0.76rem;
         letter-spacing: 1px;
         text-transform: uppercase;
         padding: 10px 24px;
         width: 100%;
-        transition: background 0.2s;
+        transition: background 0.2s, box-shadow 0.2s;
+        box-shadow: 0 2px 8px rgba(31,78,121,0.2);
     }}
     .stButton > button:hover {{
-        background: {COLOR['teal']};
+        background: linear-gradient(135deg, {COLOR['teal']} 0%, #267a86 100%);
         color: white;
+        box-shadow: 0 4px 14px rgba(47,143,157,0.3);
     }}
 
     /* ── Download buttons ── */
@@ -284,9 +347,9 @@ def inject_css() -> None:
         background: {COLOR['teal']};
         color: white;
         border: none;
-        border-radius: 4px;
+        border-radius: 6px;
         font-weight: 600;
-        font-size: 0.78rem;
+        font-size: 0.76rem;
         letter-spacing: 1px;
         text-transform: uppercase;
         width: 100%;
@@ -294,29 +357,36 @@ def inject_css() -> None:
 
     /* ── Info boxes ── */
     .info-box {{
-        background: {COLOR['light_bg']};
+        background: rgba(255,255,255,0.7);
+        backdrop-filter: blur(6px);
         border: 1px solid {COLOR['border']};
-        border-radius: 6px;
+        border-radius: 8px;
         padding: 12px 16px;
-        font-size: 0.82rem;
+        font-size: 0.8rem;
         color: {COLOR['muted']};
         margin: 8px 0;
+        line-height: 1.55;
     }}
 
-    /* ── Legend ── */
-    .legend-item {{
+    /* ── Type breakdown row ── */
+    .type-row {{
         display: flex;
         align-items: center;
-        gap: 8px;
-        font-size: 0.78rem;
-        color: {COLOR['dark_text']};
-        margin-bottom: 4px;
+        gap: 10px;
+        margin-bottom: 7px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        background: rgba(255,255,255,0.6);
     }}
-    .legend-dot {{
-        width: 12px; height: 12px;
-        border-radius: 50%;
+    .type-glyph {{
+        width: 18px;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 700;
         flex-shrink: 0;
     }}
+    .type-label {{ flex: 1; font-size: 0.8rem; }}
+    .type-count {{ font-size: 0.8rem; font-weight: 600; font-family: 'JetBrains Mono', monospace; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -389,15 +459,15 @@ def compute_baseline_metrics(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_header() -> None:
-    """Render the Ministry of Health–style banner."""
+    """Render the Ministry of Health-style banner."""
     st.markdown("""
     <div class="moh-banner">
         <div class="moh-flag">
             <span style="background:#c1272d;width:20px"></span>
             <span style="background:#006233;width:20px"></span>
         </div>
-        <h1>🏥 MOROCCO HEALTHCARE ACCESS OPTIMIZATION</h1>
-        <p>Decision-support system for facility planning &amp; telemedicine simulation — Ministry of Health</p>
+        <h1>Morocco Healthcare Access Optimization</h1>
+        <p>Decision-support system for facility planning and telemedicine simulation</p>
     </div>
     """, unsafe_allow_html=True)
     st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
@@ -409,20 +479,20 @@ def render_header() -> None:
 
 def render_sidebar(facilities_gdf: gpd.GeoDataFrame) -> dict:
     """
-    Render sidebar controls and return filter/scenario configuration.
+    Render sidebar filters and return filter configuration.
+    Scenario controls live on the Scenario Simulation tab.
     """
     with st.sidebar:
         st.markdown(f"""
         <div style='padding:12px 0 8px 0;'>
             <div style='font-size:0.65rem;font-weight:700;letter-spacing:2px;
                         text-transform:uppercase;color:{COLOR["primary"]};
-                        margin-bottom:2px;'>Dashboard Controls</div>
+                        margin-bottom:2px;'>Filters</div>
             <div style='height:2px;background:{COLOR["teal"]};border-radius:1px;'></div>
         </div>
         """, unsafe_allow_html=True)
 
-        # ── 1. Region filter ──────────────────────────────────────────────
-        st.markdown("**🗺 Region**")
+        st.markdown("**Region**")
         regions = ["All Regions"]
         if "region" in facilities_gdf.columns:
             r = sorted(facilities_gdf["region"].dropna().unique().tolist())
@@ -431,8 +501,7 @@ def render_sidebar(facilities_gdf: gpd.GeoDataFrame) -> dict:
             "Select region", regions, label_visibility="collapsed"
         )
 
-        # ── 2. Facility type ──────────────────────────────────────────────
-        st.markdown("**🏥 Facility Type**")
+        st.markdown("**Facility Type**")
         all_types = sorted(facilities_gdf["facility_type"].dropna().unique().tolist())
         selected_types = st.multiselect(
             "Select types", all_types, default=all_types,
@@ -441,8 +510,7 @@ def render_sidebar(facilities_gdf: gpd.GeoDataFrame) -> dict:
         if not selected_types:
             selected_types = all_types
 
-        # ── 3. Distance radius ────────────────────────────────────────────
-        st.markdown("**📏 Coverage Radius**")
+        st.markdown("**Coverage Radius**")
         radius_km = st.selectbox(
             "Coverage radius", [5, 10, 20],
             format_func=lambda x: f"{x} km",
@@ -450,31 +518,11 @@ def render_sidebar(facilities_gdf: gpd.GeoDataFrame) -> dict:
         )
 
         st.markdown("---")
-
-        # ── 4. Scenario simulator ─────────────────────────────────────────
-        st.markdown(f"""
-        <div style='font-size:0.65rem;font-weight:700;letter-spacing:2px;
-                    text-transform:uppercase;color:{COLOR["primary"]};
-                    margin-bottom:8px;'>⚙️ Scenario Simulator</div>
-        """, unsafe_allow_html=True)
-
-        new_facilities = st.number_input(
-            "🏗 New clinics / facilities", min_value=0, max_value=500, value=3, step=1
-        )
-        mobile_units = st.number_input(
-            "🚐 Mobile health units", min_value=0, max_value=200, value=1, step=1
-        )
-        kiosks = st.number_input(
-            "💻 Telemedicine kiosks", min_value=0, max_value=500, value=2, step=1
-        )
-
-        run_btn = st.button("▶ RUN SCENARIO", use_container_width=True)
-
-        st.markdown("---")
+        total = len(facilities_gdf)
         st.markdown(f"""
         <div class='info-box'>
-            <b>Data source:</b> OpenStreetMap via Overpass API<br>
-            <b>Population:</b> WorldPop Morocco synthetic grid<br>
+            <b>Dataset:</b> {total:,} facilities (OpenStreetMap)<br>
+            <b>Population:</b> WorldPop synthetic grid<br>
             <b>CRS:</b> EPSG:4326 (WGS84)
         </div>
         """, unsafe_allow_html=True)
@@ -483,10 +531,6 @@ def render_sidebar(facilities_gdf: gpd.GeoDataFrame) -> dict:
         "region":         selected_region,
         "facility_types": selected_types,
         "radius_km":      radius_km,
-        "new_facilities": new_facilities,
-        "mobile_units":   mobile_units,
-        "kiosks":         kiosks,
-        "run_scenario":   run_btn,
     }
 
 
@@ -520,18 +564,38 @@ def apply_filters(
 # VISUALIZATIONS
 # ══════════════════════════════════════════════════════════════════════════════
 
-# Unicode glyphs that visually match each Plotly Scattermap symbol.
-# Displayed in the custom HTML legend so the user sees the exact shape + colour.
+# Unicode glyphs matching Plotly Scattermap symbols (star, square, circle, triangle, x)
 FACILITY_LEGEND_GLYPHS = {
-    "hospital": "★",   # star
-    "clinic":   "■",   # square
-    "doctor":   "●",   # circle
-    "pharmacy": "▲",   # triangle
-    "other":    "✕",   # x
+    "hospital": "\u2605",
+    "clinic":   "\u25a0",
+    "doctor":   "\u25cf",
+    "pharmacy": "\u25b2",
+    "other":    "\u2715",
 }
 
 # Canonical display order for the legend
 FACILITY_TYPE_ORDER = ["hospital", "clinic", "doctor", "pharmacy", "other"]
+
+# Plotly symbol names shown in legend subtitle for clarity
+FACILITY_SYMBOL_LABELS = {
+    "hospital": "star",
+    "clinic":   "square",
+    "doctor":   "circle",
+    "pharmacy": "triangle",
+    "other":    "cross",
+}
+
+
+def _ordered_facility_types(facilities_gdf: gpd.GeoDataFrame) -> list[str]:
+    present = facilities_gdf["facility_type"].dropna().unique().tolist()
+    ordered = [t for t in FACILITY_TYPE_ORDER if t in present]
+    ordered += [t for t in present if t not in FACILITY_TYPE_ORDER]
+    return ordered
+
+
+def _legend_height(n_types: int) -> int:
+    """Compact legend iframe height based on visible facility types."""
+    return max(52, 36 + n_types * 26)
 
 
 def build_facility_map(
@@ -569,8 +633,7 @@ def build_facility_map(
 
     # ── Facility markers by type (in fixed display order) ─────────────────
     present_types = facilities_gdf["facility_type"].unique().tolist()
-    ordered_types = [t for t in FACILITY_TYPE_ORDER if t in present_types]
-    ordered_types += [t for t in present_types if t not in FACILITY_TYPE_ORDER]
+    ordered_types = _ordered_facility_types(facilities_gdf)
 
     for ftype in ordered_types:
         subset = facilities_gdf[facilities_gdf["facility_type"] == ftype].copy()
@@ -623,94 +686,81 @@ def build_facility_map(
 
 def build_facility_legend_html(facilities_gdf: gpd.GeoDataFrame) -> str:
     """
-    Return a full HTML document for the facility-type legend.
-    Rendered via st.components.v1.html() (iframe) so the markup is never
-    sanitised or escaped by Streamlit's markdown processor.
+    Compact HTML legend — only facility types present in the current filter.
+    Glyphs match Plotly Scattermap symbols exactly.
     """
-    present_types = facilities_gdf["facility_type"].dropna().unique().tolist()
-    ordered = [t for t in FACILITY_TYPE_ORDER if t in present_types]
-    ordered += [t for t in present_types if t not in FACILITY_TYPE_ORDER]
+    ordered = _ordered_facility_types(facilities_gdf)
+    if not ordered:
+        return ""
 
     rows = ""
     for ftype in ordered:
         color = FACILITY_COLORS.get(ftype, FACILITY_COLORS["other"])
-        glyph = FACILITY_LEGEND_GLYPHS.get(ftype, "●")
+        glyph = FACILITY_LEGEND_GLYPHS.get(ftype, "\u25cf")
+        sym_label = FACILITY_SYMBOL_LABELS.get(ftype, "marker")
         count = int((facilities_gdf["facility_type"] == ftype).sum())
         rows += f"""
         <div class="row">
             <span class="glyph" style="color:{color};">{glyph}</span>
             <span class="label">{ftype.capitalize()}</span>
+            <span class="sym">{sym_label}</span>
             <span class="count">{count:,}</span>
         </div>"""
 
     return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
+<html><head><meta charset="utf-8">
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{
-    font-family: 'Segoe UI', sans-serif;
-    background: transparent;
-    padding: 0;
-  }}
+  body {{ font-family:'Source Sans 3','Segoe UI',sans-serif; background:transparent; }}
   .card {{
-    display: inline-block;
-    background: rgba(255,255,255,0.97);
-    border: 1px solid #D5E8F0;
-    border-radius: 7px;
-    padding: 10px 14px;
-    min-width: 190px;
-    box-shadow: 0 1px 5px rgba(0,0,0,0.09);
+    display:inline-flex; flex-direction:column;
+    background:rgba(255,255,255,0.96);
+    border:1px solid #D5E8F0;
+    border-radius:8px;
+    padding:8px 12px;
+    min-width:220px;
+    box-shadow:0 2px 10px rgba(31,78,121,0.08);
   }}
   .title {{
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1.6px;
-    text-transform: uppercase;
-    color: #1F4E79;
-    border-bottom: 1px solid #D5E8F0;
-    padding-bottom: 6px;
-    margin-bottom: 8px;
+    font-size:9px; font-weight:700; letter-spacing:1.8px;
+    text-transform:uppercase; color:#1F4E79;
+    border-bottom:1px solid #D5E8F0;
+    padding-bottom:5px; margin-bottom:6px;
   }}
   .row {{
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 5px;
+    display:grid;
+    grid-template-columns:18px 1fr auto auto;
+    align-items:center;
+    gap:6px;
+    margin-bottom:3px;
   }}
   .glyph {{
-    font-size: 14px;
-    width: 18px;
-    text-align: center;
-    flex-shrink: 0;
-    line-height: 1;
+    font-size:13px; text-align:center; line-height:1;
+    font-weight:700;
   }}
-  .label {{
-    font-size: 12px;
-    color: #1B2631;
-    flex: 1;
+  .label {{ font-size:11px; color:#1B2631; }}
+  .sym {{
+    font-size:9px; color:#5D6D7E; text-transform:uppercase;
+    letter-spacing:0.5px;
   }}
   .count {{
-    font-size: 11px;
-    color: #5D6D7E;
-    font-weight: 600;
+    font-size:10px; color:#5D6D7E; font-weight:600;
+    font-family:'JetBrains Mono',monospace;
+    text-align:right; min-width:36px;
   }}
-</style>
-</head>
+</style></head>
 <body>
   <div class="card">
-    <div class="title">Facility Types</div>
+    <div class="title">Map Legend</div>
     {rows}
   </div>
-</body>
-</html>"""
+</body></html>"""
 
 
 SCENARIO_STYLES = {
-    "new_facilities":      dict(color="#922B21", symbol="star",     size=14, label="New facility",        glyph="★"),
-    "mobile_units":        dict(color="#CA6F1E", symbol="triangle", size=12, label="Mobile unit",         glyph="▲"),
-    "telemedicine_kiosks": dict(color="#2F8F9D", symbol="circle",   size=10, label="Telemedicine kiosk",  glyph="●"),
+    "new_facilities":      dict(color="#922B21", symbol="star",     size=14, label="New facility",       glyph="\u2605"),
+    "mobile_units":        dict(color="#CA6F1E", symbol="triangle", size=12, label="Mobile unit",        glyph="\u25b2"),
+    "telemedicine_kiosks": dict(color="#2F8F9D", symbol="circle",   size=10, label="Telemedicine kiosk", glyph="\u25cf"),
 }
 
 
@@ -808,8 +858,9 @@ def build_scenario_legend_html(
 
     rows = f"""
     <div class="row">
-        <span class="glyph" style="color:#888888;">●</span>
-        <span class="label">Existing facilities</span>
+        <span class="glyph" style="color:#888888;">\u25cf</span>
+        <span class="label">Existing</span>
+        <span class="sym">circle</span>
         <span class="count">{len(existing_gdf):,}</span>
     </div>"""
 
@@ -817,84 +868,108 @@ def build_scenario_legend_html(
         sites = interventions.get(key, {}).get("sites", [])
         if not sites:
             continue
+        sym = "star" if style["symbol"] == "star" else style["symbol"]
         rows += f"""
     <div class="row">
         <span class="glyph" style="color:{style['color']};">{style['glyph']}</span>
         <span class="label">{style['label']}</span>
+        <span class="sym">{sym}</span>
         <span class="count">{len(sites)}</span>
     </div>"""
 
     return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
+<html><head><meta charset="utf-8">
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ font-family: 'Segoe UI', sans-serif; background: transparent; }}
+  body {{ font-family:'Source Sans 3','Segoe UI',sans-serif; background:transparent; }}
   .card {{
-    display: inline-block;
-    background: rgba(255,255,255,0.97);
-    border: 1px solid #D5E8F0;
-    border-radius: 7px;
-    padding: 10px 14px;
-    min-width: 210px;
-    box-shadow: 0 1px 5px rgba(0,0,0,0.09);
+    display:inline-flex; flex-direction:column;
+    background:rgba(255,255,255,0.96);
+    border:1px solid #D5E8F0; border-radius:8px;
+    padding:8px 12px; min-width:230px;
+    box-shadow:0 2px 10px rgba(31,78,121,0.08);
   }}
   .title {{
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1.6px;
-    text-transform: uppercase;
-    color: #1F4E79;
-    border-bottom: 1px solid #D5E8F0;
-    padding-bottom: 6px;
-    margin-bottom: 8px;
+    font-size:9px; font-weight:700; letter-spacing:1.8px;
+    text-transform:uppercase; color:#1F4E79;
+    border-bottom:1px solid #D5E8F0;
+    padding-bottom:5px; margin-bottom:6px;
   }}
   .row {{
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 5px;
+    display:grid; grid-template-columns:18px 1fr auto auto;
+    align-items:center; gap:6px; margin-bottom:3px;
   }}
-  .glyph {{
-    font-size: 14px;
-    width: 18px;
-    text-align: center;
-    flex-shrink: 0;
-    line-height: 1;
-  }}
-  .label {{ font-size: 12px; color: #1B2631; flex: 1; }}
-  .count {{ font-size: 11px; color: #5D6D7E; font-weight: 600; }}
-</style>
-</head>
+  .glyph {{ font-size:13px; text-align:center; font-weight:700; }}
+  .label {{ font-size:11px; color:#1B2631; }}
+  .sym {{ font-size:9px; color:#5D6D7E; text-transform:uppercase; }}
+  .count {{ font-size:10px; color:#5D6D7E; font-weight:600;
+            font-family:'JetBrains Mono',monospace; text-align:right; }}
+</style></head>
 <body>
   <div class="card">
-    <div class="title">Proposed Facility Locations</div>
+    <div class="title">Scenario Legend</div>
     {rows}
   </div>
-</body>
-</html>"""
+</body></html>"""
 
 
 def build_region_bar_chart(ratio_df: pd.DataFrame) -> go.Figure:
-    """Bar chart of population per facility by region."""
+    """Bar chart of population per facility for all 12 Morocco admin regions."""
     df = ratio_df[
-        (ratio_df["region"] != "National") & (ratio_df["facility_type"] == "all")
+        (ratio_df["region"].isin(MOROCCO_REGIONS)) & (ratio_df["facility_type"] == "all")
     ].copy()
-    if df.empty:
-        return go.Figure()
 
-    df = df.sort_values("pop_per_facility", ascending=True).head(15)
-    df["color"] = df["underserved"].map({True: COLOR["danger"], False: COLOR["success"]})
+    # Guarantee every official region appears even if ratio pipeline missed one
+    present = set(df["region"].tolist())
+    for region in MOROCCO_REGIONS:
+        if region not in present:
+            df = pd.concat([df, pd.DataFrame([{
+                "region": region,
+                "facility_type": "all",
+                "total_population": 0,
+                "facility_count": 0,
+                "pop_per_facility": 0,
+                "underserved": True,
+            }])], ignore_index=True)
+
+    # Sort ascending so most underserved regions appear at the top of the horizontal chart
+    df = df.sort_values("pop_per_facility", ascending=True, na_position="first")
+    df["display_ratio"] = df["pop_per_facility"].fillna(0)
+    df["color"] = df.apply(
+        lambda r: COLOR["muted"] if pd.isna(r["pop_per_facility"])
+        else (COLOR["danger"] if r["underserved"] else COLOR["success"]),
+        axis=1,
+    )
+    df["bar_text"] = df.apply(
+        lambda r: (
+            "No facilities" if r["facility_count"] == 0
+            else "N/A" if pd.isna(r["pop_per_facility"])
+            else f"{r['pop_per_facility']:,.0f}"
+        ),
+        axis=1,
+    )
+
+    n_regions = len(df)
+    chart_height = max(440, 30 * n_regions + 120)
 
     fig = go.Figure(go.Bar(
-        x=df["pop_per_facility"],
+        x=df["display_ratio"],
         y=df["region"],
         orientation="h",
         marker_color=df["color"],
-        text=df["pop_per_facility"].apply(lambda x: f"{x:,.0f}"),
+        text=df["bar_text"],
         textposition="outside",
-        hovertemplate="<b>%{y}</b><br>Pop/facility: %{x:,.0f}<br><extra></extra>",
+        customdata=np.stack([
+            df["facility_count"].values,
+            df["total_population"].values,
+        ], axis=-1),
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Pop/facility: %{text}<br>"
+            "Facilities: %{customdata[0]:,}<br>"
+            "Population: %{customdata[1]:,.0f}"
+            "<extra></extra>"
+        ),
     ))
 
     fig.add_vline(
@@ -905,12 +980,23 @@ def build_region_bar_chart(ratio_df: pd.DataFrame) -> go.Figure:
     )
 
     fig.update_layout(
-        height=380,
-        margin=dict(l=10, r=60, t=10, b=10),
+        height=chart_height,
+        margin=dict(l=8, r=110, t=10, b=10),
         paper_bgcolor=COLOR["white"],
         plot_bgcolor=COLOR["light_bg"],
-        xaxis=dict(title="Population per facility", gridcolor=COLOR["border"], title_font=dict(size=11)),
-        yaxis=dict(title="", tickfont=dict(size=10)),
+        xaxis=dict(
+            title="Population per facility",
+            gridcolor=COLOR["border"],
+            title_font=dict(size=11),
+            rangemode="tozero",
+        ),
+        yaxis=dict(
+            title="",
+            tickfont=dict(size=10),
+            categoryorder="array",
+            categoryarray=df["region"].tolist(),
+            automargin=True,
+        ),
         showlegend=False,
     )
     return fig
@@ -941,132 +1027,190 @@ def coverage_status(pct: float, radius: int) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — ACCESS OVERVIEW
+# TAB 1 — DASHBOARD (facility map)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def render_overview_tab(
+def render_dashboard_tab(
     filtered_facilities: gpd.GeoDataFrame,
     pop_gdf: gpd.GeoDataFrame,
+    radius_km: int,
+) -> None:
+    st.markdown('<div class="section-header">Facility Map and Population Density</div>',
+                unsafe_allow_html=True)
+
+    with st.spinner("Rendering map..."):
+        fig = build_facility_map(filtered_facilities, pop_gdf, radius_km)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    ordered = _ordered_facility_types(filtered_facilities)
+    legend_h = _legend_height(len(ordered))
+    components.html(
+        build_facility_legend_html(filtered_facilities),
+        height=legend_h,
+        scrolling=False,
+    )
+
+    st.markdown(f"""
+    <div class='info-box' style='margin-top:8px;'>
+        Map symbols match the legend above (star, square, circle, triangle, cross).
+        Background heatmap shows population density (WorldPop grid, top 2,000 cells).
+        Coverage radius for metrics is set in the sidebar ({radius_km} km).
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — ACCESSIBILITY METRICS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _type_breakdown_row(ftype: str, count: int) -> str:
+    color = FACILITY_COLORS.get(ftype, FACILITY_COLORS["other"])
+    glyph = FACILITY_LEGEND_GLYPHS.get(ftype, "\u25cf")
+    return f"""
+    <div class='type-row'>
+        <span class='type-glyph' style='color:{color};'>{glyph}</span>
+        <span class='type-label'>{ftype.capitalize()}</span>
+        <span class='type-count'>{count:,}</span>
+    </div>"""
+
+
+def render_metrics_tab(
+    filtered_facilities: gpd.GeoDataFrame,
     baseline: dict,
     radius_km: int,
 ) -> None:
-    col_map, col_metrics = st.columns([3, 1.1], gap="medium")
+    total_pop    = baseline.get("total_population", 0)
+    n_facilities = len(filtered_facilities)
+    pwd          = baseline.get("pop_weighted_distance_km", 0)
+    coverage     = baseline.get("coverage", {})
+    cov5         = coverage.get("coverage_5km",  0)
+    cov10        = coverage.get("coverage_10km", 0)
+    cov20        = coverage.get("coverage_20km", 0)
+    pct_far      = max(0, 100 - cov20)
 
-    with col_map:
-        st.markdown('<div class="section-header">🗺 Facility Map & Population Density</div>',
-                    unsafe_allow_html=True)
-        with st.spinner("Rendering map..."):
-            fig = build_facility_map(filtered_facilities, pop_gdf, radius_km)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-            components.html(build_facility_legend_html(filtered_facilities), height=160, scrolling=False)
+    st.markdown('<div class="section-header">Key Access Indicators</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="section-header">📊 Population per Facility by Region</div>',
-                    unsafe_allow_html=True)
-        ratio_df = baseline.get("ratio_df", pd.DataFrame())
-        if not ratio_df.empty:
-            fig2 = build_region_bar_chart(ratio_df)
-            st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
-
-    with col_metrics:
-        st.markdown('<div class="section-header">📈 Key Metrics</div>', unsafe_allow_html=True)
-
-        total_pop    = baseline.get("total_population", 0)
-        n_facilities = len(filtered_facilities)
-        pwd          = baseline.get("pop_weighted_distance_km", 0)
-        coverage     = baseline.get("coverage", {})
-
-        cov5    = coverage.get("coverage_5km",  0)
-        cov10   = coverage.get("coverage_10km", 0)
-        cov20   = coverage.get("coverage_20km", 0)
-        pct_far = max(0, 100 - cov20)
-
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
         st.markdown(metric_card("Total Population", f"{total_pop/1_000_000:.1f}M",
                                 sub="Morocco estimate (WorldPop)"), unsafe_allow_html=True)
+    with k2:
         st.markdown(metric_card("Facilities Mapped", f"{n_facilities:,}",
                                 sub="OSM-sourced, Morocco"), unsafe_allow_html=True)
-        st.markdown(metric_card("Avg Distance to Facility", f"{pwd:.1f} km",
+    with k3:
+        st.markdown(metric_card("Avg Distance", f"{pwd:.1f} km",
                                 sub="Population-weighted mean",
                                 status="good" if pwd < 5 else ("warn" if pwd < 12 else "bad")),
                     unsafe_allow_html=True)
+    with k4:
         st.markdown(metric_card(f"Within {radius_km} km",
                                 f"{coverage.get(f'coverage_{radius_km}km', 0):.1f}%",
-                                sub="of population near a facility",
+                                sub="population near a facility",
                                 status=coverage_status(coverage.get(f"coverage_{radius_km}km", 0), radius_km)),
                     unsafe_allow_html=True)
-        st.markdown(metric_card("Within 5 km",  f"{cov5:.1f}%",  status=coverage_status(cov5, 5)),
-                    unsafe_allow_html=True)
-        st.markdown(metric_card("Within 10 km", f"{cov10:.1f}%", status=coverage_status(cov10, 10)),
-                    unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(metric_card("Within 5 km",  f"{cov5:.1f}%",
+                                status=coverage_status(cov5, 5)), unsafe_allow_html=True)
+    with c2:
+        st.markdown(metric_card("Within 10 km", f"{cov10:.1f}%",
+                                status=coverage_status(cov10, 10)), unsafe_allow_html=True)
+    with c3:
         st.markdown(metric_card("Beyond 20 km", f"{pct_far:.1f}%",
                                 sub="Underserved population",
                                 status="bad" if pct_far > 20 else ("warn" if pct_far > 10 else "good")),
                     unsafe_allow_html=True)
 
-        st.markdown('<div class="section-header" style="margin-top:20px;">🏥 By Facility Type</div>',
+    col_chart, col_types = st.columns([3, 1], gap="medium")
+
+    with col_chart:
+        st.markdown('<div class="section-header">Population per Facility by Region</div>',
                     unsafe_allow_html=True)
+        ratio_df = baseline.get("ratio_df", pd.DataFrame())
+        if not ratio_df.empty:
+            fig2 = build_region_bar_chart(ratio_df)
+            st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
+        else:
+            st.info("Regional ratio data unavailable. Run the access metrics pipeline.")
+
+    with col_types:
+        st.markdown('<div class="section-header">By Facility Type</div>', unsafe_allow_html=True)
         if "facility_type" in filtered_facilities.columns:
             type_counts = filtered_facilities["facility_type"].value_counts()
-            for ftype, count in type_counts.items():
-                color = FACILITY_COLORS.get(ftype, FACILITY_COLORS["other"])
-                st.markdown(f"""
-                <div style='display:flex;align-items:center;gap:8px;margin-bottom:6px;'>
-                    <div style='width:10px;height:10px;border-radius:50%;
-                                background:{color};flex-shrink:0;'></div>
-                    <div style='flex:1;font-size:0.8rem;'>{ftype.capitalize()}</div>
-                    <div style='font-size:0.8rem;font-weight:600;
-                                color:{COLOR["dark_text"]};'>{count:,}</div>
-                </div>
-                """, unsafe_allow_html=True)
+            ordered = _ordered_facility_types(filtered_facilities)
+            for ftype in ordered:
+                if ftype in type_counts.index:
+                    st.markdown(
+                        _type_breakdown_row(ftype, int(type_counts[ftype])),
+                        unsafe_allow_html=True,
+                    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — SCENARIO SIMULATION
+# TAB 3 — SCENARIO SIMULATION
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_scenario_tab(
     facilities_gdf: gpd.GeoDataFrame,
     pop_gdf: gpd.GeoDataFrame,
     baseline: dict,
-    scenario_config: dict,
 ) -> None:
-    # ── Run scenario if button pressed ───────────────────────────────────
-    if scenario_config["run_scenario"]:
-        total = (scenario_config["new_facilities"]
-                 + scenario_config["mobile_units"]
-                 + scenario_config["kiosks"])
+    st.markdown('<div class="section-header">Intervention Parameters</div>', unsafe_allow_html=True)
+
+    p1, p2, p3, p4 = st.columns([1, 1, 1, 1])
+    with p1:
+        new_facilities = st.number_input(
+            "New clinics / facilities", min_value=0, max_value=500, value=3, step=1,
+            key="scenario_new_facilities",
+        )
+    with p2:
+        mobile_units = st.number_input(
+            "Mobile health units", min_value=0, max_value=200, value=1, step=1,
+            key="scenario_mobile_units",
+        )
+    with p3:
+        kiosks = st.number_input(
+            "Telemedicine kiosks", min_value=0, max_value=500, value=2, step=1,
+            key="scenario_kiosks",
+        )
+    with p4:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        run_btn = st.button("Run Scenario", type="primary", use_container_width=True)
+
+    if run_btn:
+        total = new_facilities + mobile_units + kiosks
         if total == 0:
-            st.warning("Set at least one intervention in the sidebar before running.")
+            st.warning("Set at least one intervention before running.")
         else:
-            with st.spinner("🔄 Running optimization scenario..."):
+            with st.spinner("Running optimization scenario..."):
                 try:
                     results = run_scenario(
                         pop_gdf=pop_gdf,
                         facilities_gdf=facilities_gdf,
-                        new_facilities=scenario_config["new_facilities"],
-                        mobile_units=scenario_config["mobile_units"],
-                        telemedicine_kiosks=scenario_config["kiosks"],
+                        new_facilities=new_facilities,
+                        mobile_units=mobile_units,
+                        telemedicine_kiosks=kiosks,
                     )
                     st.session_state["scenario_results"] = results
                     st.session_state["scenario_config_used"] = {
-                        "new_facilities": scenario_config["new_facilities"],
-                        "mobile_units":   scenario_config["mobile_units"],
-                        "kiosks":         scenario_config["kiosks"],
+                        "new_facilities": new_facilities,
+                        "mobile_units":   mobile_units,
+                        "kiosks":         kiosks,
                     }
                 except Exception as e:
                     st.error(f"Scenario failed: {e}")
                     logger.exception("Scenario error")
 
-    # ── Display results ───────────────────────────────────────────────────
     results = st.session_state.get("scenario_results", load_scenario_results())
 
     if not results:
         st.markdown(f"""
         <div class='info-box' style='text-align:center;padding:40px;'>
-            <div style='font-size:2rem;margin-bottom:12px;'>⚙️</div>
             <div style='font-weight:600;font-size:1rem;color:{COLOR["primary"]};
                         margin-bottom:8px;'>No scenario run yet</div>
             <div style='color:{COLOR["muted"]};font-size:0.85rem;'>
-                Set the values in the sidebar and click <b>▶ RUN SCENARIO</b>
+                Configure interventions above and click <b>Run Scenario</b>.
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -1081,9 +1225,9 @@ def render_scenario_tab(
     col_metrics, col_map = st.columns([1.1, 3], gap="medium")
 
     with col_metrics:
-        st.markdown('<div class="section-header">📊 Before / After</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Before / After</div>', unsafe_allow_html=True)
 
-        st.markdown(f"<div class='scenario-card before'><div class='scenario-title before'>◼ BEFORE</div>",
+        st.markdown(f"<div class='scenario-card before'><div class='scenario-title before'>Before</div>",
                     unsafe_allow_html=True)
         st.markdown(metric_card("Avg Distance",  f"{before.get('avg_distance_km', 0):.2f} km"),
                     unsafe_allow_html=True)
@@ -1095,25 +1239,25 @@ def render_scenario_tab(
 
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-        st.markdown(f"<div class='scenario-card after'><div class='scenario-title after'>▲ AFTER</div>",
+        st.markdown(f"<div class='scenario-card after'><div class='scenario-title after'>After</div>",
                     unsafe_allow_html=True)
         st.markdown(metric_card("Avg Distance", f"{after.get('avg_distance_km', 0):.2f} km",
-                                sub=f"▼ {abs(delta.get('avg_distance_km', 0)):.2f} km improvement",
+                                sub=f"-{abs(delta.get('avg_distance_km', 0)):.2f} km improvement",
                                 status="good"), unsafe_allow_html=True)
         st.markdown(metric_card("Coverage 5km",  f"{after.get('coverage_5km', 0):.1f}%",
-                                sub=f"▲ +{delta.get('coverage_5km', 0):.1f}%",
+                                sub=f"+{delta.get('coverage_5km', 0):.1f}%",
                                 status="good"), unsafe_allow_html=True)
         st.markdown(metric_card("Coverage 10km", f"{after.get('coverage_10km', 0):.1f}%",
-                                sub=f"▲ +{delta.get('coverage_10km', 0):.1f}%",
+                                sub=f"+{delta.get('coverage_10km', 0):.1f}%",
                                 status="good"), unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        st.markdown('<div class="section-header">💰 Cost Analysis</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Cost Analysis</div>', unsafe_allow_html=True)
 
         st.markdown(metric_card("Total Investment",
                                 f"{costs.get('total_cost_mad', 0)/1_000_000:.1f}M MAD",
-                                sub=f"≈ ${costs.get('total_cost_usd_approx', 0)/1_000:.0f}K USD"),
+                                sub=f"approx. ${costs.get('total_cost_usd_approx', 0)/1_000:.0f}K USD"),
                     unsafe_allow_html=True)
 
         newly_covered = combined.get("population_newly_covered_10km", 0)
@@ -1128,7 +1272,7 @@ def render_scenario_tab(
                                     sub="reached within 10km"), unsafe_allow_html=True)
 
     with col_map:
-        st.markdown('<div class="section-header">🗺 Proposed Facility Locations</div>',
+        st.markdown('<div class="section-header">Proposed Facility Locations</div>',
                     unsafe_allow_html=True)
 
         if "lon" not in facilities_gdf.columns:
@@ -1139,19 +1283,23 @@ def render_scenario_tab(
         with st.spinner("Rendering scenario map..."):
             fig = build_scenario_map(facilities_gdf, results)
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            interventions = results.get("interventions", {})
+            n_legend_rows = 1 + sum(
+                1 for k in SCENARIO_STYLES if interventions.get(k, {}).get("sites")
+            )
             components.html(
                 build_scenario_legend_html(facilities_gdf, results),
-                height=130, scrolling=False,
+                height=_legend_height(n_legend_rows),
+                scrolling=False,
             )
 
-        interventions = results.get("interventions", {})
         if interventions:
-            st.markdown('<div class="section-header">📋 Proposed Sites</div>', unsafe_allow_html=True)
+            st.markdown('<div class="section-header">Proposed Sites</div>', unsafe_allow_html=True)
             rows = []
             type_labels = {
-                "new_facilities":      "🏗 New Facility",
-                "mobile_units":        "🚐 Mobile Unit",
-                "telemedicine_kiosks": "💻 Telemedicine",
+                "new_facilities":      "New Facility",
+                "mobile_units":        "Mobile Unit",
+                "telemedicine_kiosks": "Telemedicine",
             }
             for key, data in interventions.items():
                 for site in data.get("sites", []):
@@ -1175,21 +1323,21 @@ def render_export_tab(
     filtered_facilities: gpd.GeoDataFrame,
     metrics_df: pd.DataFrame,
 ) -> None:
-    st.markdown('<div class="section-header">📥 Export Data</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Export Data</div>', unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3, gap="large")
 
     with col1:
         st.markdown(f"""
-        <div class='scenario-card' style='border-top:4px solid {COLOR["primary"]};'>
-            <div class='scenario-title' style='color:{COLOR["primary"]};'>📊 ACCESS METRICS</div>
+        <div class='scenario-card' style='border-top:3px solid {COLOR["primary"]};'>
+            <div class='scenario-title' style='color:{COLOR["primary"]};'>Access Metrics</div>
             <div style='font-size:0.82rem;color:{COLOR["muted"]};margin-bottom:16px;'>
                 Full access metrics CSV including nearest facility distances,
                 coverage flags, and population weights for all grid cells.
             </div>
         """, unsafe_allow_html=True)
         if not metrics_df.empty:
-            st.download_button(label="⬇ Download access_metrics.csv",
+            st.download_button(label="Download access_metrics.csv",
                                data=metrics_df.to_csv(index=False).encode("utf-8"),
                                file_name="morocco_access_metrics.csv",
                                mime="text/csv", use_container_width=True)
@@ -1199,8 +1347,8 @@ def render_export_tab(
 
     with col2:
         st.markdown(f"""
-        <div class='scenario-card' style='border-top:4px solid {COLOR["teal"]};'>
-            <div class='scenario-title' style='color:{COLOR["teal"]};'>⚙️ SCENARIO RESULTS</div>
+        <div class='scenario-card' style='border-top:3px solid {COLOR["teal"]};'>
+            <div class='scenario-title' style='color:{COLOR["teal"]};'>Scenario Results</div>
             <div style='font-size:0.82rem;color:{COLOR["muted"]};margin-bottom:16px;'>
                 Scenario simulation output including before/after metrics,
                 proposed site coordinates, cost analysis, and coverage gains.
@@ -1208,7 +1356,7 @@ def render_export_tab(
         """, unsafe_allow_html=True)
         scenario_data = st.session_state.get("scenario_results", load_scenario_results())
         if scenario_data:
-            st.download_button(label="⬇ Download scenario_results.json",
+            st.download_button(label="Download scenario_results.json",
                                data=json.dumps(scenario_data, indent=2, ensure_ascii=False).encode("utf-8"),
                                file_name="morocco_scenario_results.json",
                                mime="application/json", use_container_width=True)
@@ -1218,22 +1366,22 @@ def render_export_tab(
 
     with col3:
         st.markdown(f"""
-        <div class='scenario-card' style='border-top:4px solid {COLOR["success"]};'>
-            <div class='scenario-title' style='color:{COLOR["success"]};'>🏥 FILTERED FACILITIES</div>
+        <div class='scenario-card' style='border-top:3px solid {COLOR["success"]};'>
+            <div class='scenario-title' style='color:{COLOR["success"]};'>Filtered Facilities</div>
             <div style='font-size:0.82rem;color:{COLOR["muted"]};margin-bottom:16px;'>
                 Currently filtered facility dataset. Reflects your active region and
                 facility type selections. <b>{len(filtered_facilities):,} facilities</b> selected.
             </div>
         """, unsafe_allow_html=True)
         export_df = filtered_facilities.drop(columns=["geometry"], errors="ignore")
-        st.download_button(label="⬇ Download filtered_facilities.csv",
+        st.download_button(label="Download filtered_facilities.csv",
                            data=export_df.to_csv(index=False).encode("utf-8"),
                            file_name="morocco_facilities_filtered.csv",
                            mime="text/csv", use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-    st.markdown('<div class="section-header">📖 Data Dictionary</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Data Dictionary</div>', unsafe_allow_html=True)
 
     dict_data = {
         "Field": ["osm_id","facility_type","name_clean","sector","region","lat","lon",
@@ -1287,34 +1435,36 @@ def main() -> None:
 
     region_label = config["region"]
     st.markdown(f"""
-    <div style='background:{COLOR["light_bg"]};border:1px solid {COLOR["border"]};
-                border-radius:6px;padding:8px 16px;font-size:0.8rem;
-                color:{COLOR["muted"]};margin-bottom:12px;display:flex;gap:24px;'>
-        <span>📍 <b>Region:</b> {region_label}</span>
-        <span>🏥 <b>Types:</b> {", ".join(config["facility_types"])}</span>
-        <span>📏 <b>Radius:</b> {config["radius_km"]} km</span>
-        <span>🔢 <b>Facilities shown:</b> {len(filtered):,}</span>
+    <div class="status-strip">
+        <span><b>Region:</b> {region_label}</span>
+        <span><b>Types:</b> {", ".join(config["facility_types"])}</span>
+        <span><b>Radius:</b> {config["radius_km"]} km</span>
+        <span><b>Facilities:</b> {len(filtered):,}</span>
+        <span><b>Dataset:</b> {len(facilities_gdf):,} total (OSM)</span>
     </div>
     """, unsafe_allow_html=True)
 
-    tab1, tab2, tab3 = st.tabs([
-        "  🗺  ACCESS OVERVIEW  ",
-        "  ⚙️  SCENARIO SIMULATION  ",
-        "  📥  DATA EXPORT  ",
+    tab_dash, tab_metrics, tab_scenario, tab_export = st.tabs([
+        "Dashboard",
+        "Accessibility Metrics",
+        "Scenario Simulation",
+        "Data Export",
     ])
 
-    with tab1:
-        render_overview_tab(filtered, pop_gdf, baseline, config["radius_km"])
+    with tab_dash:
+        render_dashboard_tab(filtered, pop_gdf, config["radius_km"])
 
-    with tab2:
+    with tab_metrics:
+        render_metrics_tab(filtered, baseline, config["radius_km"])
+
+    with tab_scenario:
         render_scenario_tab(
             facilities_gdf=facilities_gdf,
             pop_gdf=pop_gdf,
             baseline=baseline,
-            scenario_config=config,
         )
 
-    with tab3:
+    with tab_export:
         render_export_tab(filtered, metrics_df)
 
 

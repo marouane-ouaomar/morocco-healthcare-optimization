@@ -38,11 +38,11 @@ LEVEL_FACILITY_TYPES: dict[str, list[str]] = {
 
 # Display labels per facility type
 FACILITY_DISPLAY: dict[str, dict[str, str]] = {
-    "hospital": {"icon": "🏥", "label": "Hospital",        "color": "#922B21"},
-    "clinic":   {"icon": "🩺", "label": "Clinic",           "color": "#1F4E79"},
-    "doctor":   {"icon": "👨‍⚕️", "label": "Doctor / Health Centre", "color": "#2F8F9D"},
-    "pharmacy": {"icon": "💊", "label": "Pharmacy",         "color": "#1E8449"},
-    "other":    {"icon": "🏩", "label": "Health Facility",  "color": "#5D6D7E"},
+    "hospital": {"icon": "\u2605", "label": "Hospital",               "color": "#922B21"},
+    "clinic":   {"icon": "\u25a0", "label": "Clinic",                 "color": "#1F4E79"},
+    "doctor":   {"icon": "\u25cf", "label": "Doctor / Health Centre", "color": "#2F8F9D"},
+    "pharmacy": {"icon": "\u25b2", "label": "Pharmacy",               "color": "#1E8449"},
+    "other":    {"icon": "\u2715", "label": "Health Facility",        "color": "#5D6D7E"},
 }
 
 EARTH_RADIUS_KM = 6371.0
@@ -59,7 +59,7 @@ class NearbyFacility:
     distance_km:   float
     region:        str = "Unknown"
     sector:        str = "unknown"
-    icon:          str = "🏥"
+    icon:          str = "\u2605"
     label:         str = "Health Facility"
     color:         str = "#5D6D7E"
     google_maps_url: str = ""

@@ -1,6 +1,6 @@
 [theme]
 primaryColor = "#1F4E79"
-backgroundColor = "#FFFFFF"
+backgroundColor = "#EEF4FA"
 secondaryBackgroundColor = "#EAF2F8"
 textColor = "#1B2631"
 font = "sans serif"
@@ -8,6 +8,7 @@ font = "sans serif"
 [server]
 headless = true
 enableCORS = false
+enableXsrfProtection = true
 port = 8501
 
 [browser]

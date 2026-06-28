@@ -26,7 +26,6 @@ MANIFEST
 venv/
 ENV/
 env/
-.env/
 
 # === Environment variables (NEVER commit real secrets) ===
 .env
@@ -62,14 +61,16 @@ coverage.xml
 *.hdf
 *.nc
 *.h5
-data/raw/
+
+# Raw OSM fetch output — regenerated via scripts/fetch_osm_facilities.py
+data/raw/*
 !data/raw/.gitkeep
 
-# === Large data outputs (keep processed GeoJSON samples only) ===
+# Processed outputs that can be regenerated (keep GeoJSON for Streamlit Cloud)
 data/processed/*.csv
+data/processed/scenario_results.json
 !data/processed/.gitkeep
-# Keep small GeoJSON samples — add specific exclusions if needed
-# data/processed/*.geojson  # uncomment to exclude all GeoJSON
+# Committed for cloud deploy: facilities.geojson, popgrid.geojson
 
 # === Model artifacts ===
 *.pkl
@@ -98,12 +99,10 @@ $RECYCLE.BIN/
 *.msp
 *.lnk
 
-# === Streamlit ===
+# === Streamlit Community Cloud ===
 .streamlit/secrets.toml
 
 # === Misc ===
 *.bak
 *.tmp
 scratch/
-
-.env

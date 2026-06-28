@@ -24,6 +24,8 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import KDTree
 
+from src.data_prep import MOROCCO_REGIONS, assign_admin_region
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
 
@@ -246,33 +248,34 @@ def population_per_facility_ratio(
 
     # ── Regional breakdown ────────────────────────────────────────────────
     if region_col in facilities_gdf.columns:
-        # Approximate region populations using Voronoi / nearest cell approach
-        # Here we assign each pop cell to its nearest facility's region
-        if len(facilities_gdf) > 0:
-            fac_coords = _to_metric_coords(facilities_gdf)
-            pop_coords = _to_metric_coords(pop_gdf)
-            tree = KDTree(fac_coords)
-            _, indices = tree.query(pop_coords, k=1, workers=-1)
+        # Assign each population cell to an admin region by coordinates
+        # (same heuristic as data_prep.assign_admin_region), not by nearest facility.
+        pop_assigned = assign_admin_region(pop_gdf.copy())
+        region_pops = pop_assigned.groupby("region")["population"].sum()
+        region_fac_counts = facilities_gdf.groupby(region_col).size()
 
-            fac_regions = facilities_gdf[region_col].values
-            pop_gdf = pop_gdf.copy()
-            pop_gdf["assigned_region"] = fac_regions[indices]
+        regions_to_report = list(MOROCCO_REGIONS)
+        for region in region_pops.index:
+            if region not in regions_to_report and region != "National":
+                regions_to_report.append(region)
 
-            region_pops = pop_gdf.groupby("assigned_region")["population"].sum()
-            region_fac_counts = facilities_gdf.groupby(region_col).size()
-
-            for region in region_pops.index:
-                reg_pop = region_pops.get(region, 0)
-                reg_fac = region_fac_counts.get(region, 0)
-                ratio = float(reg_pop / reg_fac) if reg_fac > 0 else float("inf")
-                records.append({
-                    "region": region,
-                    "facility_type": "all",
-                    "total_population": round(reg_pop),
-                    "facility_count": int(reg_fac),
-                    "pop_per_facility": round(ratio),
-                    "underserved": ratio > 10_000,
-                })
+        for region in regions_to_report:
+            reg_pop = float(region_pops.get(region, 0))
+            reg_fac = int(region_fac_counts.get(region, 0))
+            if reg_pop == 0 and reg_fac == 0:
+                continue
+            if reg_fac > 0:
+                ratio = (reg_pop / reg_fac) if reg_pop > 0 else None
+            else:
+                ratio = float("inf")
+            records.append({
+                "region": region,
+                "facility_type": "all",
+                "total_population": round(reg_pop),
+                "facility_count": reg_fac,
+                "pop_per_facility": round(ratio) if ratio is not None and np.isfinite(ratio) else None,
+                "underserved": (ratio > 10_000 if ratio is not None and np.isfinite(ratio) else True),
+            })
 
     result = pd.DataFrame(records).sort_values("pop_per_facility", ascending=False)
     logger.info(f"population_per_facility_ratio: {len(result)} rows computed")

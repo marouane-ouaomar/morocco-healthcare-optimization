@@ -24,7 +24,6 @@ from streamlit_js_eval import get_geolocation
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Triage Bot · Morocco Healthcare",
-    page_icon="🩺",
     layout="centered",
 )
 
@@ -39,6 +38,7 @@ st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600;700&family=Source+Serif+4:wght@600;700&display=swap');
 html,body,[class*="css"]{{font-family:'Source Sans 3',sans-serif;}}
+.stApp{{background:linear-gradient(165deg,#eef4fa 0%,#e4eef6 50%,#f2f7fb 100%);}}
 #MainMenu,footer{{visibility:hidden;}}
 .block-container{{max-width:760px;padding-top:2rem;padding-bottom:6rem;}}
 [data-testid="stChatMessage"]{{border-radius:12px;margin-bottom:4px;}}
@@ -60,7 +60,8 @@ html,body,[class*="css"]{{font-family:'Source Sans 3',sans-serif;}}
 .fac-card{{display:flex;align-items:flex-start;gap:11px;background:white;
   border:1px solid #D5E8F0;border-radius:8px;padding:11px 14px;
   border-left:4px solid;margin-bottom:6px;}}
-.fac-icon{{font-size:1.5rem;flex-shrink:0;margin-top:2px;line-height:1;}}
+.fac-icon{{font-size:1.1rem;font-weight:700;flex-shrink:0;margin-top:2px;line-height:1;
+  width:18px;text-align:center;}}
 .fac-info{{flex:1;}}
 .fac-name{{font-size:.86rem;font-weight:700;color:#1B2631;}}
 .fac-type{{font-size:.7rem;font-weight:600;text-transform:uppercase;
@@ -80,12 +81,12 @@ html,body,[class*="css"]{{font-family:'Source Sans 3',sans-serif;}}
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div style="
-  background: linear-gradient(135deg, {C["primary"]} 0%, #163d61 100%);
+  background: linear-gradient(135deg, {C["primary"]} 0%, #163d61 55%, #1a4a70 100%);
   padding: 20px 26px;
   border-radius: 10px;
-  border-left: 6px solid {C["teal"]};
+  border-left: 5px solid {C["teal"]};
   margin-bottom: 18px;
-  box-shadow: 0 4px 16px rgba(31,78,121,0.18);
+  box-shadow: 0 8px 32px rgba(31,78,121,0.22);
 ">
   <div style="display:flex;gap:4px;margin-bottom:10px;">
     <span style="display:inline-block;width:22px;height:4px;background:#c1272d;border-radius:2px;"></span>
@@ -93,11 +94,11 @@ st.markdown(f"""
   </div>
   <div style="font-family:'Source Serif 4',serif;font-size:1.4rem;font-weight:700;
               color:white;line-height:1.2;">
-    🩺 Triage Assistant
+    Triage Assistant
   </div>
   <div style="font-size:0.78rem;color:rgba(255,255,255,0.72);
     text-transform:uppercase;letter-spacing:1.2px;margin-top:6px;">
-    Morocco Healthcare · Phase 5 Demo
+    Morocco Healthcare · Research Demo
   </div>
 </div>""", unsafe_allow_html=True)
 
@@ -126,7 +127,6 @@ def load_facilities_cached():
 facilities_gdf = load_facilities_cached()
 
 # ── Location state ────────────────────────────────────────────────────────────
-# Persisted in session_state so it survives reruns without re-requesting GPS.
 if "user_lat" not in st.session_state:
     st.session_state.user_lat = None
 if "user_lon" not in st.session_state:
@@ -137,54 +137,49 @@ user_lon = st.session_state.user_lon
 
 # ── Geolocation widget ───────────────────────────────────────────────────────
 def render_geolocation_widget() -> None:
-    """
-    Request device location using streamlit-js-eval.
-    Runs in the main page context (not a sandboxed iframe) so it works
-    on Streamlit Community Cloud.
-    """
-    col_btn, col_status = st.columns([1, 2])
-    with col_btn:
-        request = st.button("📍 Share My Location", use_container_width=True, key="geo_btn")
-    with col_status:
-        st.markdown(
-            f"<div style='font-size:.78rem;color:{C['muted']};padding-top:8px;'>"
-            "Tap to share GPS location</div>",
-            unsafe_allow_html=True,
-        )
+  """Request device location using streamlit-js-eval."""
+  col_btn, col_status = st.columns([1, 2])
+  with col_btn:
+      request = st.button("Share My Location", use_container_width=True, key="geo_btn")
+  with col_status:
+      st.markdown(
+          f"<div style='font-size:.78rem;color:{C['muted']};padding-top:8px;'>"
+          "Tap to share GPS location</div>",
+          unsafe_allow_html=True,
+      )
 
-    if request or st.session_state.get("_geo_pending"):
-        st.session_state["_geo_pending"] = True
-        with st.spinner("Requesting location…"):
-            loc = get_geolocation()
+  if request or st.session_state.get("_geo_pending"):
+      st.session_state["_geo_pending"] = True
+      with st.spinner("Requesting location..."):
+          loc = get_geolocation()
 
-        if loc and "coords" in loc:
-            lat = loc["coords"].get("latitude")
-            lon = loc["coords"].get("longitude")
-            if lat is not None and lon is not None:
-                # Validate Morocco bounding box (relaxed — allow any global coords for testing)
-                st.session_state.user_lat = round(float(lat), 6)
-                st.session_state.user_lon = round(float(lon), 6)
-                st.session_state["_geo_pending"] = False
-                st.rerun()
-        elif loc is None:
-            st.markdown(
-                "<div style='font-size:.78rem;color:#922B21;'>"
-                "❌ Location denied or unavailable. "
-                "Enter coordinates manually below.</div>",
-                unsafe_allow_html=True,
-            )
-            # Manual fallback
-            with st.expander("📝 Enter coordinates manually"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    mlat = st.number_input("Latitude", value=33.5731, format="%.4f", key="manual_lat")
-                with c2:
-                    mlon = st.number_input("Longitude", value=-7.5898, format="%.4f", key="manual_lon")
-                if st.button("✅ Use these coordinates", key="manual_confirm"):
-                    st.session_state.user_lat = mlat
-                    st.session_state.user_lon = mlon
-                    st.session_state["_geo_pending"] = False
-                    st.rerun()
+      if loc and "coords" in loc:
+          lat = loc["coords"].get("latitude")
+          lon = loc["coords"].get("longitude")
+          if lat is not None and lon is not None:
+              st.session_state.user_lat = round(float(lat), 6)
+              st.session_state.user_lon = round(float(lon), 6)
+              st.session_state["_geo_pending"] = False
+              st.rerun()
+      elif loc is None:
+          st.markdown(
+              "<div style='font-size:.78rem;color:#922B21;'>"
+              "Location denied or unavailable. "
+              "Enter coordinates manually below.</div>",
+              unsafe_allow_html=True,
+          )
+          with st.expander("Enter coordinates manually"):
+              c1, c2 = st.columns(2)
+              with c1:
+                  mlat = st.number_input("Latitude", value=33.5731, format="%.4f", key="manual_lat")
+              with c2:
+                  mlon = st.number_input("Longitude", value=-7.5898, format="%.4f", key="manual_lon")
+              if st.button("Use these coordinates", key="manual_confirm"):
+                  st.session_state.user_lat = mlat
+                  st.session_state.user_lon = mlon
+                  st.session_state["_geo_pending"] = False
+                  st.rerun()
+
 
 # ── HTML helpers ──────────────────────────────────────────────────────────────
 def emergency_html(advice_text: str) -> str:
@@ -203,7 +198,7 @@ def emergency_html(advice_text: str) -> str:
       .num-item b{{display:block;font-size:.95rem;}}
     </style></head><body>
     <div class="emerg-card">
-      <h4>🚨 Emergency — Call Immediately</h4>
+      <h4>Emergency — Call Immediately</h4>
       <div>{advice_text}</div>
       <div class="num-grid">{nums}</div>
     </div></body></html>"""
@@ -238,7 +233,8 @@ def facility_card_html(fac) -> str:
       .card{{display:flex;align-items:flex-start;gap:11px;background:white;
         border:1px solid #D5E8F0;border-radius:8px;padding:11px 14px;
         border-left:4px solid {fac.color};}}
-      .icon{{font-size:1.5rem;flex-shrink:0;margin-top:2px;line-height:1;}}
+      .icon{{font-size:1.1rem;font-weight:700;flex-shrink:0;margin-top:2px;line-height:1;
+        width:18px;text-align:center;color:{fac.color};}}
       .info{{flex:1;}}
       .name{{font-size:.86rem;font-weight:700;color:#1B2631;}}
       .type{{font-size:.7rem;font-weight:600;text-transform:uppercase;
@@ -262,8 +258,8 @@ def facility_card_html(fac) -> str:
           {"<span class='pub'>Public</span>" if fac.sector=="public" else "<span class='priv'>Private</span>" if fac.sector=="private" else ""}
         </div>
         <div class="type">{fac.label}</div>
-        <div class="region">📌 {fac.region}</div>
-        <a href="{fac.google_maps_url}" target="_blank">🗺 Open in Google Maps</a>
+        <div class="region">{fac.region}</div>
+        <a href="{fac.google_maps_url}" target="_blank">Open in Google Maps</a>
       </div>
       <div class="dist">{fac.distance_km:.1f}<span class="km">km away</span></div>
     </div></body></html>"""
@@ -274,7 +270,7 @@ def render_message(msg: dict) -> None:
     role = msg["role"]
     kind = msg.get("kind", "text")
 
-    with st.chat_message(role, avatar="🩺" if role == "assistant" else "🧑"):
+    with st.chat_message(role):
         if kind == "text":
             st.markdown(msg["content"])
 
@@ -282,7 +278,7 @@ def render_message(msg: dict) -> None:
             st.markdown("""
             <div style='background:#FEF9E7;border:2px solid #CA6F1E;border-radius:8px;
               padding:14px 18px;font-size:.82rem;line-height:1.6;color:#5D4E00;'>
-              <b>⚠️ Demo only — not a medical device.</b> In an emergency call
+              <b>Demo only — not a medical device.</b> In an emergency call
               <b>SAMU 15</b> or <b>112</b> immediately. This tool does not diagnose.
             </div>""", unsafe_allow_html=True)
 
@@ -291,10 +287,10 @@ def render_message(msg: dict) -> None:
 
         elif kind == "advice":
             meta = {
-                "see_doctor": ("🩺 Consult a Doctor", "#EBF5FB", "#2F8F9D", "#154360"),
-                "monitor":    ("👁 Monitor Symptoms",  "#EAFAF1", "#1E8449", "#1D6A39"),
+                "see_doctor": ("Consult a Doctor", "#EBF5FB", "#2F8F9D", "#154360"),
+                "monitor":    ("Monitor Symptoms",  "#EAFAF1", "#1E8449", "#1D6A39"),
             }
-            title, bg, border, fg = meta.get(msg["level"], ("ℹ️ Guidance","#EAF2F8","#5D6D7E","#1B2631"))
+            title, bg, border, fg = meta.get(msg["level"], ("Guidance","#EAF2F8","#5D6D7E","#1B2631"))
             components.html(
                 advice_html(title, msg["advice_text"], msg["disclaimer"], bg, border, fg, msg["source"]),
                 height=210, scrolling=False,
@@ -308,17 +304,17 @@ def render_message(msg: dict) -> None:
             lon_d = msg.get("lon") or st.session_state.get("user_lon", 0)
             st.markdown(
                 f"<div style='font-size:.8rem;color:#1E8449;font-weight:600;'>"
-                f"✅ Location captured: {lat_d:.4f}°N, {lon_d:.4f}°E</div>",
+                f"Location captured: {lat_d:.4f}N, {lon_d:.4f}E</div>",
                 unsafe_allow_html=True,
             )
 
         elif kind == "facilities":
             rec = {
-                "monitor":    "💊 For mild symptoms — nearest **pharmacies**:",
-                "see_doctor": "🩺 For professional evaluation — nearest **clinics/doctors**:",
-                "emergency":  "🏥 Nearest **hospitals** — go immediately:",
+                "monitor":    "For mild symptoms — nearest **pharmacies**:",
+                "see_doctor": "For professional evaluation — nearest **clinics/doctors**:",
+                "emergency":  "Nearest **hospitals** — go immediately:",
             }
-            st.markdown(rec.get(msg["level"], "📍 Nearest facilities:"))
+            st.markdown(rec.get(msg["level"], "Nearest facilities:"))
             for fac in msg["facilities"]:
                 components.html(facility_card_html(fac), height=125, scrolling=False)
 
@@ -335,15 +331,16 @@ for msg in st.session_state.messages:
 
 # ── Boot greeting (first load only) ──────────────────────────────────────────
 if not st.session_state.messages:
+    mode_label = "AI-assisted" if api_mode else "Rule-based fallback"
     greeting_msgs = [
         {"role": "assistant", "kind": "disclaimer", "content": ""},
         {"role": "assistant", "kind": "text",
          "content": (
-             f"Hello! I'm your **symptom triage assistant** 👋\n\n"
-             f"Tell me what you're experiencing and I'll suggest whether you need "
-             f"a **pharmacy**, a **clinic**, or **emergency care** — and show you the "
+             "Hello! I'm your **symptom triage assistant**.\n\n"
+             "Tell me what you're experiencing and I'll suggest whether you need "
+             "a **pharmacy**, a **clinic**, or **emergency care** — and show you the "
              f"nearest one to you.\n\n"
-             f"*Mode: {'🤖 AI-assisted' if api_mode else '📋 Rule-based fallback'}*"
+             f"*Mode: {mode_label}*"
          )},
     ]
     for m in greeting_msgs:
@@ -373,15 +370,15 @@ if user_lat is not None and st.session_state.triage_done and st.session_state.la
         render_message(fac_msg)
 
 # ── Chat input ────────────────────────────────────────────────────────────────
-if prompt := st.chat_input("Describe your symptoms…"):
+if prompt := st.chat_input("Describe your symptoms..."):
 
     user_msg = {"role": "user", "kind": "text", "content": prompt}
     st.session_state.messages.append(user_msg)
-    with st.chat_message("user", avatar="🧑"):
+    with st.chat_message("user"):
         st.markdown(prompt)
 
-    with st.chat_message("assistant", avatar="🩺"):
-        with st.spinner("Analysing…"):
+    with st.chat_message("assistant"):
+        with st.spinner("Analysing..."):
             result: TriageResponse = triage(prompt)
 
         level = result.advice_level
@@ -401,16 +398,15 @@ if prompt := st.chat_input("Describe your symptoms…"):
             }
             st.session_state.messages.append(msg)
             meta = {
-                AdviceLevel.SEE_DOCTOR: ("🩺 Consult a Doctor","#EBF5FB","#2F8F9D","#154360"),
-                AdviceLevel.MONITOR:    ("👁 Monitor Symptoms", "#EAFAF1","#1E8449","#1D6A39"),
+                AdviceLevel.SEE_DOCTOR: ("Consult a Doctor","#EBF5FB","#2F8F9D","#154360"),
+                AdviceLevel.MONITOR:    ("Monitor Symptoms", "#EAFAF1","#1E8449","#1D6A39"),
             }
-            title,bg,border,fg = meta.get(level,("ℹ️","#EAF2F8","#5D6D7E","#1B2631"))
+            title,bg,border,fg = meta.get(level,("Guidance","#EAF2F8","#5D6D7E","#1B2631"))
             components.html(
                 advice_html(title,result.advice_text,result.disclaimer,bg,border,fg,result.source),
                 height=210, scrolling=False,
             )
 
-        # Refresh from session_state in case location arrived this rerun
         user_lat = st.session_state.user_lat
         user_lon = st.session_state.user_lon
         if user_lat is not None and facilities_gdf is not None:
@@ -421,11 +417,11 @@ if prompt := st.chat_input("Describe your symptoms…"):
             )
             if nearby:
                 rec = {
-                    "monitor":    "💊 For mild symptoms — nearest **pharmacies**:",
-                    "see_doctor": "🩺 Nearest **clinics/doctors** for evaluation:",
-                    "emergency":  "🏥 Nearest **hospitals** — go immediately:",
+                    "monitor":    "For mild symptoms — nearest **pharmacies**:",
+                    "see_doctor": "Nearest **clinics/doctors** for evaluation:",
+                    "emergency":  "Nearest **hospitals** — go immediately:",
                 }
-                st.markdown(rec.get(level, "📍 Nearest facilities:"))
+                st.markdown(rec.get(level, "Nearest facilities:"))
                 fac_msg = {"role":"assistant","kind":"facilities","level":level,"facilities":nearby}
                 st.session_state.messages.append(fac_msg)
                 for fac in nearby:
@@ -438,7 +434,7 @@ if prompt := st.chat_input("Describe your symptoms…"):
             geo_prompt = {
                 "role": "assistant", "kind": "facility_prompt",
                 "content": (
-                    "📍 **Share your location** below to see the nearest "
+                    "**Share your location** below to see the nearest "
                     + ("pharmacy." if level == AdviceLevel.MONITOR
                        else "clinic or doctor." if level == AdviceLevel.SEE_DOCTOR
                        else "hospital.")
@@ -458,7 +454,7 @@ with st.sidebar:
       Triage Bot Controls
     </div>""", unsafe_allow_html=True)
 
-    if st.button("🗑 Clear conversation", use_container_width=True):
+    if st.button("Clear conversation", use_container_width=True):
         st.session_state.messages = []
         st.session_state.triage_done = False
         st.session_state.last_level = None
@@ -470,10 +466,10 @@ with st.sidebar:
     if user_lat is not None:
         st.markdown(
             f"<div style='font-size:.75rem;color:{C['success']};margin-top:8px;'>"
-            f"📍 {user_lat:.4f}°N, {user_lon:.4f}°E</div>",
+            f"{user_lat:.4f}N, {user_lon:.4f}E</div>",
             unsafe_allow_html=True,
         )
-        if st.button(" Reset location", use_container_width=True):
+        if st.button("Reset location", use_container_width=True):
             st.session_state.user_lat = None
             st.session_state.user_lon = None
             st.session_state["_geo_pending"] = False
@@ -482,7 +478,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(f"""
     <div style='font-size:.72rem;color:{C["muted"]};line-height:1.6;'>
-      <b> Demo only</b><br>
+      <b>Demo only</b><br>
       Not a medical device.<br>
       Emergency: <b>Call 15</b> / <b>112</b>
     </div>""", unsafe_allow_html=True)
